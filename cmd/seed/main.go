@@ -71,6 +71,8 @@ func run(args []string, stdout, stderr *os.File) int {
 		return runTemplate(args[1:], stdout, stderr)
 	case "workflow":
 		return runWorkflow(args[1:], stdout, stderr)
+	case "skills":
+		return runSkills(args[1:], stdout, stderr)
 	case "init":
 		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Init() })
 	case "init-github":
@@ -123,6 +125,9 @@ commands:
                                execute a workflow in parallel waves; --mock is
                                zero-credential AND zero-side-effect; run state
                                under <git-common-dir>/seed-runs/<run-id>/
+  skills lock                  resolve seed.yaml sources and pin seed.lock
+  skills install [--frozen]    materialize pinned skills into skills/managed/
+                               (--frozen refuses unlocked edits and drift — CI)
   init                         create the seed-state ref (orphan; race-safe)
   init-github                  print the server-side protection checklist
   state resume --actor A       clear the HALT marker (operator)
