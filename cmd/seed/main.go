@@ -69,6 +69,8 @@ func run(args []string, stdout, stderr *os.File) int {
 		return runUpgrade(args[1:], stdout, stderr)
 	case "template":
 		return runTemplate(args[1:], stdout, stderr)
+	case "workflow":
+		return runWorkflow(args[1:], stdout, stderr)
 	case "init":
 		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Init() })
 	case "init-github":
@@ -114,6 +116,13 @@ commands:
                                recorded in .seed/template.lock; work products
                                never merged; no push, no PR — exit map 0 ok,
                                1 refusal, 7 template host unreachable)
+  workflow validate [<file>|--all] [--with-harnesses]
+                               preflight checked-in workflow DAGs (the thirteen
+                               rules; any finding exits 3)
+  workflow run <name> [--input k=v]... [--mock] [--resume <id>]
+                               execute a workflow in parallel waves; --mock is
+                               zero-credential AND zero-side-effect; run state
+                               under <git-common-dir>/seed-runs/<run-id>/
   init                         create the seed-state ref (orphan; race-safe)
   init-github                  print the server-side protection checklist
   state resume --actor A       clear the HALT marker (operator)
