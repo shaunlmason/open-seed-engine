@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/shaunlmason/open-seed-engine/internal/config"
 	"github.com/shaunlmason/open-seed-engine/internal/gitx"
@@ -61,16 +62,9 @@ func run(args []string, stdout, stderr *os.File) int {
 	case "init-github":
 		return runInitGithub(stdout, stderr)
 	case "state":
-		if len(args) < 2 || args[1] != "resume" {
-			usage(stderr)
-			return exitUsage
-		}
-		fs := flag.NewFlagSet("state resume", flag.ContinueOnError)
-		actor := fs.String("actor", "", "operator actor")
-		if fs.Parse(args[2:]) != nil || *actor == "" {
-			return exitUsage
-		}
-		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Resume(*actor) })
+		return runState(args[1:], stdout, stderr)
+	case "maintain":
+		return runMaintain(args[1:], stdout, stderr)
 	case "task":
 		return runTask(args[1:], stdout, stderr)
 	default:
@@ -94,6 +88,11 @@ commands:
   init                         create the seed-state ref (orphan; race-safe)
   init-github                  print the server-side protection checklist
   state resume --actor A       clear the HALT marker (operator)
+  state lint [--halt-on-fail] [--actor A]   card lint + done-consistency +
+                               transition-table replay; failure writes HALT
+  state anchor                 tag the state head as seed-anchor/<ts> and push
+  maintain reap --actor A      release every expired lease (handoff stubs)
+  maintain report              per-state counts, expired leases, stalled reviews
   task <verb> ...              port verbs (JSON envelope on stdout):
     create --title T [--body B] [--priority P2] [--squad S] [--parent ID]
            [--label L]... [--blocks ID]... [--blocked-by ID]... --actor A
@@ -103,7 +102,9 @@ commands:
     transition <id> --to STATE --actor A [--token T] [--blocked-on entry]
     release <id> --actor A --token T
     accept|reject|cancel|promote|deprioritize|block|unblock|reinstate|close <id>
-           --actor A [--resolution MSG] [--blocked-on entry]
+           --actor A [--resolution MSG] [--blocked-on entry] [--no-pr]
+    plan-unblock <id> --pr N --actor A     remove a plan:<N> entry (operator;
+           the caller has established the PR is merged or closed)
     comment <id> --actor A --body B [--token T]
     attach-evidence <id> --actor A --kind K --ref R [--token T]
     lease-renew <id> --actor A --token T [--lease 45m]
@@ -144,6 +145,61 @@ func withService(stdout, stderr *os.File, f func(*task.Service) *task.Result) in
 		return spec.ExitVersionMismatch
 	}
 	return emit(stdout, f(sv))
+}
+
+func runState(args []string, stdout, stderr *os.File) int {
+	if len(args) == 0 {
+		usage(stderr)
+		return exitUsage
+	}
+	fs := flag.NewFlagSet("state "+args[0], flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	actor := fs.String("actor", "maintenance", "acting identity")
+	haltOnFail := fs.Bool("halt-on-fail", false, "write the HALT marker on conformance failure")
+	if fs.Parse(args[1:]) != nil {
+		return exitUsage
+	}
+	switch args[0] {
+	case "resume":
+		if *actor == "" {
+			return exitUsage
+		}
+		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Resume(*actor) })
+	case "lint":
+		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.StateLint(*haltOnFail, *actor) })
+	case "anchor":
+		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Anchor() })
+	default:
+		usage(stderr)
+		return exitUsage
+	}
+}
+
+func runMaintain(args []string, stdout, stderr *os.File) int {
+	if len(args) == 0 {
+		usage(stderr)
+		return exitUsage
+	}
+	fs := flag.NewFlagSet("maintain "+args[0], flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	actor := fs.String("actor", "", "operator actor")
+	stalled := fs.Duration("stalled-after", 48*time.Hour, "review/parked age considered stalled")
+	if fs.Parse(args[1:]) != nil {
+		return exitUsage
+	}
+	switch args[0] {
+	case "reap":
+		if *actor == "" {
+			fmt.Fprintln(stderr, "seed maintain reap: --actor required (must be in the operator roster)")
+			return exitUsage
+		}
+		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.ReapExpired(*actor) })
+	case "report":
+		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Report(*stalled) })
+	default:
+		usage(stderr)
+		return exitUsage
+	}
 }
 
 var operatorVerbs = map[string]bool{
@@ -188,6 +244,8 @@ func runTask(args []string, stdout, stderr *os.File) int {
 	state := fs.String("state", "", "")
 	kind := fs.String("kind", "", "")
 	ref := fs.String("ref", "", "")
+	pr := fs.Int("pr", 0, "")
+	noPR := fs.Bool("no-pr", false, "")
 	fs.Var(&labels, "label", "")
 	fs.Var(&blocks, "blocks", "")
 	fs.Var(&blockedBy, "blocked-by", "")
@@ -216,6 +274,8 @@ func runTask(args []string, stdout, stderr *os.File) int {
 		case "transition", "release":
 			return sv.Transition(task.TransitionArgs{Verb: verb, ID: id, To: *to,
 				Actor: *actor, Token: *token, BlockedOn: *blockedOn, Resolution: *resolution})
+		case "plan-unblock":
+			return sv.PlanUnblock(id, *pr, *actor)
 		case "comment":
 			return sv.Append("comment", id, *actor, *token, *body, "")
 		case "attach-evidence":
@@ -225,7 +285,7 @@ func runTask(args []string, stdout, stderr *os.File) int {
 		default:
 			if operatorVerbs[verb] {
 				return sv.Transition(task.TransitionArgs{Verb: verb, ID: id, To: *to,
-					Actor: *actor, Token: *token, BlockedOn: *blockedOn, Resolution: *resolution})
+					Actor: *actor, Token: *token, BlockedOn: *blockedOn, Resolution: *resolution, NoPR: *noPR})
 			}
 			return &task.Result{Code: exitUsage, Err: "unknown_verb"}
 		}

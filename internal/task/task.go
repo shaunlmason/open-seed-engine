@@ -295,6 +295,7 @@ type TransitionArgs struct {
 	Verb, ID, To, Actor, Token string
 	BlockedOn                  string // entry for block/parking
 	Resolution                 string // evidence for accept/reject/close
+	NoPR                       bool   // D7 no-PR close: evidence gets the no-pr: exemption marker
 }
 
 func (sv *Service) Transition(a TransitionArgs) *Result {
@@ -355,7 +356,14 @@ func (sv *Service) applyEffects(head string, c *card.Card, out port.Outcome, a T
 			if a.Verb == "reject" {
 				outcome = "rejected"
 			}
-			c.Review = &card.Review{Reviewer: a.Actor, ReviewedAt: now, Outcome: outcome, Evidence: a.Resolution}
+			evidence := a.Resolution
+			if a.NoPR {
+				// D7 exemption marker: every validator recognizes no-PR
+				// closes by this prefix; the workflow supplies the
+				// server-attributed artifact URL as the resolution.
+				evidence = "no-pr:" + evidence
+			}
+			c.Review = &card.Review{Reviewer: a.Actor, ReviewedAt: now, Outcome: outcome, Evidence: evidence}
 		case "append_rejected_author":
 			if c.Author != "" && !slices.Contains(c.RejectedAuthors, c.Author) {
 				c.RejectedAuthors = append(c.RejectedAuthors, c.Author)
