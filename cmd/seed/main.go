@@ -19,6 +19,7 @@ import (
 	"github.com/shaunlmason/open-seed-engine/internal/prclass"
 	"github.com/shaunlmason/open-seed-engine/internal/receipt"
 	"github.com/shaunlmason/open-seed-engine/internal/spec"
+	seedsync "github.com/shaunlmason/open-seed-engine/internal/sync"
 	"github.com/shaunlmason/open-seed-engine/internal/task"
 	"github.com/shaunlmason/open-seed-engine/internal/validate"
 )
@@ -57,6 +58,8 @@ func run(args []string, stdout, stderr *os.File) int {
 		return runReceipt(args[1:], stdout, stderr)
 	case "validate":
 		return runValidate(stdout, stderr)
+	case "sync":
+		return runSync(args[1:], stdout, stderr)
 	case "init":
 		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Init() })
 	case "init-github":
@@ -85,6 +88,9 @@ commands:
   receipt generate <task> --base <ref> [--run] [--by <name>] [--write]
   receipt verify <task> --base <ref> --branch <head-branch> [--run] [--write]
   validate                     lint guardrails, teams, role variants, plans
+  sync [--check]               regenerate fan-outs (.claude/agents|skills,
+                               .agents/skills, AGENTS.md rules block); --check
+                               fails on drift (offline; runs in CI — R1)
   init                         create the seed-state ref (orphan; race-safe)
   init-github                  print the server-side protection checklist
   state resume --actor A       clear the HALT marker (operator)
@@ -453,6 +459,33 @@ func runValidate(stdout, stderr *os.File) int {
 		return 1
 	}
 	fmt.Fprintln(stdout, "validate ok: guardrails, teams, role variants, plans")
+	return 0
+}
+
+func runSync(args []string, stdout, stderr *os.File) int {
+	check := len(args) > 0 && args[0] == "--check"
+	cwd, _ := os.Getwd()
+	root, found := config.FindRoot(cwd)
+	if !found {
+		fmt.Fprintln(stderr, "seed sync: no .seed directory found")
+		return 1
+	}
+	if check {
+		if errs := seedsync.Check(root); len(errs) > 0 {
+			for _, e := range errs {
+				fmt.Fprintln(stderr, "seed sync --check:", e)
+			}
+			return 1
+		}
+		fmt.Fprintln(stdout, "sync ok: fan-outs match their sources")
+		return 0
+	}
+	n, err := seedsync.Apply(root)
+	if err != nil {
+		fmt.Fprintln(stderr, "seed sync:", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "sync ok: %d file(s) written\n", n)
 	return 0
 }
 
