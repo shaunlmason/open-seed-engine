@@ -73,6 +73,10 @@ func run(args []string, stdout, stderr *os.File) int {
 		return runWorkflow(args[1:], stdout, stderr)
 	case "skills":
 		return runSkills(args[1:], stdout, stderr)
+	case "mail":
+		return runMail(args[1:], stdout, stderr)
+	case "handoff":
+		return runHandoff(args[1:], stdout, stderr)
 	case "init":
 		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Init() })
 	case "init-github":
@@ -128,6 +132,11 @@ commands:
   skills lock                  resolve seed.yaml sources and pin seed.lock
   skills install [--frozen]    materialize pinned skills into skills/managed/
                                (--frozen refuses unlocked edits and drift — CI)
+  mail send|read|ack|nudge|prune   one-file-per-message mailboxes on the
+                               state ref (ack = move; nudge = content-free
+                               tmux poke, no-op without tmux)
+  handoff generate <task> [--write]   render the mechanical continuation
+                               packet (card + git anchors) to handoff/<task>.md
   init                         create the seed-state ref (orphan; race-safe)
   init-github                  print the server-side protection checklist
   state resume --actor A       clear the HALT marker (operator)
