@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-seed.dev/port-schema/card.schema.json",
+  "title": "Task card",
+  "description": "The filecards representation of a task on the seed-state ref (tasks/<id>.md frontmatter; the body is the work order — untrusted input AND a work order, D1). Bookkeeping blocks are written only by the shim as defined side effects of verbs. Trust: exactly as trustworthy as state-ref push access (R10); load-bearing gates ground on the default branch instead.",
+  "type": "object",
+  "required": ["id", "state", "title", "created_at"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^os-[0-9a-f]{4,}$", "description": "Hash-based id, never a sequential counter (D1)"},
+    "title": {"type": "string", "minLength": 1},
+    "state": {"enum": ["backlog", "ready", "in_progress", "review", "done", "blocked", "cancelled"]},
+    "priority": {"enum": ["P0", "P1", "P2", "P3"], "default": "P2"},
+    "squad": {"type": "string", "description": "Explicit routing; otherwise priority-ordered scope matching, else core (§6)"},
+    "parent": {"type": "string", "description": "Goal ancestry link (§6 mission alignment)"},
+    "labels": {"type": "array", "items": {"type": "string"}},
+    "links": {
+      "type": "object",
+      "properties": {
+        "blocks": {"type": "array", "items": {"type": "string"}},
+        "waits_for": {"type": "array", "items": {"type": "string"}},
+        "relates_to": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "blocked_on": {
+      "type": "array",
+      "description": "Normative, shim-written, multi-valued (D1): every unblock path removes only its own entry; blocked→ready fires only when this empties.",
+      "items": {"type": "string", "pattern": "^(plan:[0-9]+|dep:os-[0-9a-f]{4,}|manual:.+)$"}
+    },
+    "rejected_authors": {
+      "type": "array", "items": {"type": "string"},
+      "description": "Appended on reject (review→ready); claim refuses these actors. Untouched by release and reap."
+    },
+    "claim": {
+      "type": "object",
+      "description": "Present iff state is in_progress (§7.1: no other state ever carries a claim).",
+      "required": ["actor", "token", "claimed_at", "lease_expires"],
+      "properties": {
+        "actor": {"type": "string"},
+        "token": {"type": "string"},
+        "claimed_at": {"type": "string", "format": "date-time"},
+        "lease_expires": {"type": "string", "format": "date-time"}
+      },
+      "additionalProperties": false
+    },
+    "review": {
+      "type": "object",
+      "description": "Written by accept/reject/close (record_review effect).",
+      "properties": {
+        "reviewer": {"type": "string", "description": "Operator identity; for no-PR closes, the server-attributed dispatch actor (D7)"},
+        "reviewed_at": {"type": "string", "format": "date-time"},
+        "outcome": {"enum": ["accepted", "rejected"]},
+        "evidence": {"type": "string", "description": "Merged PR URL, or for no-PR closes the dispatch-run/comment URL that is the card's evidence record (D7 exemption)"}
+      },
+      "additionalProperties": false
+    },
+    "plan_hash": {"type": "string", "description": "Advisory cache only — the authority is the merge-base blob (D3)"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  }
+}

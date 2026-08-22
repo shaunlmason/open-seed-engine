@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-seed.dev/port-schema/backend.schema.json",
+  "title": "Backend plugin manifest (backend.toml)",
+  "description": "Validated after TOML→JSON. A backend plugin is .seed/backends/<name>/ with this manifest and an entry executable implementing the port (research/10 §5.3–5.4). Installed plugins are pinned in .seed/backends.lock.json; the shim verifies the lock before every invocation and treats plugin output as untrusted input (§5.5).",
+  "type": "object",
+  "required": ["name", "version", "schema_version", "entry", "capabilities"],
+  "properties": {
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+    "version": {"type": "string"},
+    "schema_version": {"type": "string", "pattern": "^1\\.[0-9]+$", "description": "Port contract version implemented; mismatch with port.json is exit 10"},
+    "entry": {"type": "string", "description": "Relative path to the executable, e.g. bin/seed-backend"},
+    "requires": {"type": "array", "items": {"type": "string"}, "description": "External prerequisites, e.g. bd>=0.57.0"},
+    "requires_env": {"type": "array", "items": {"type": "string"}, "description": "Env vars the shim injects per-plugin; nothing else reaches the plugin environment (least privilege, §5.5)"},
+    "capabilities": {
+      "type": "object",
+      "required": ["required", "atomic_claim", "offline"],
+      "properties": {
+        "required": {"const": true, "description": "Must implement the full REQUIRED verb set (verbs.json); a backend without it is not conformant"},
+        "optional": {
+          "type": "array",
+          "items": {"enum": ["lease-renew", "ancestry", "dep", "event-emit", "wake", "budget", "watch", "ready_squad"]}
+        },
+        "atomic_claim": {"enum": ["native", "emulated", "none"]},
+        "offline": {"enum": ["native", "emulated", "none"]},
+        "budget": {"enum": ["native", "advisory", "none"]}
+      },
+      "additionalProperties": false
+    }
+  }
+}

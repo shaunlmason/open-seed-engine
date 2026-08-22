@@ -1,0 +1,67 @@
+{
+  "$comment": "The port verb surface: nine REQUIRED verbs (research/10 §5.1 as amended by erratum) plus optional capabilities backends declare in backend.toml. Args are CLI flags on `seed task <verb>`; outputs are fields in the envelope (envelope.schema.json). Transition legality, classes, and effects come from transitions.json — this file only describes I/O shapes.",
+  "schema_version": "1.0",
+  "required": {
+    "create": {
+      "args": {"title": "string, required", "body": "string (markdown work order)", "priority": "P0|P1|P2|P3", "parent": "task id", "blocks": "[task id]", "blocked-by": "[task id]", "labels": "[string]", "squad": "string"},
+      "output": {"task": "new hash-based id", "state": "backlog"}
+    },
+    "ready": {
+      "args": {"squad": "string (optional capability ready_squad; shim-side filter otherwise)", "limit": "int"},
+      "output": {"tasks": "[{task, title, priority, squad, created_at}] ordered by priority"},
+      "notes": "No open blockers, unclaimed, claimant not in rejected_authors. Must be cheap; reads fetch first (staleness bounded and explicit)."
+    },
+    "get": {
+      "args": {"task": "task id, required"},
+      "output": {"card": "full card object (card.schema.json)"}
+    },
+    "list": {
+      "args": {"state": "state filter", "assignee": "actor", "label": "string", "parent": "task id"},
+      "output": {"tasks": "[card summaries]"}
+    },
+    "claim": {
+      "args": {"task": "required", "actor": "required", "lease": "duration (default from config)"},
+      "output": {"task": "id", "state": "in_progress", "actor": "string", "claim_token": "string", "lease_expires": "RFC3339"},
+      "errors": {"claim_contention": {"exit": 2, "extra": {"holder": "actor", "lease_expires": "RFC3339"}}, "rejected_author": {"exit": 2}}
+    },
+    "release": {
+      "args": {"task": "required", "actor": "required", "token": "required (claim token)"},
+      "output": {"task": "id", "state": "ready"},
+      "notes": "Worker release; operator reap uses the reap override in transitions.json, presenting an operator credential and no token."
+    },
+    "transition": {
+      "args": {"task": "required", "to": "target state, required", "token": "required on worker edges", "actor": "required", "blocked-on": "entry to add when to=blocked (plan:<pr>|dep:<id>|manual:<op>)"},
+      "output": {"task": "id", "state": "new state"},
+      "errors": {"invalid_transition": {"exit": 3}, "fenced_out": {"exit": 6}}
+    },
+    "close": {
+      "args": {"task": "required", "resolution": "string message", "no-pr": "flag: human close via workflow_dispatch (D7 exemption; server-attributed)"},
+      "output": {"task": "id", "state": "done", "cascaded": "[task ids unblocked]"},
+      "errors": {"invalid_transition": {"exit": 3, "notes": "only legal from review"}}
+    },
+    "comment": {
+      "args": {"task": "required", "body": "required", "actor": "required", "token": "required while the card holds a claim"},
+      "output": {"task": "id", "comment_id": "string"}
+    },
+    "attach-evidence": {
+      "args": {"task": "required", "kind": "log|commit|pr|file", "ref": "required (SHA, URL, path, or excerpt ref)", "actor": "required", "token": "required while the card holds a claim"},
+      "output": {"task": "id", "evidence_id": "string"},
+      "notes": "Append-only."
+    },
+    "event-append": {
+      "args": {"event": "JSON object {ts, actor, verb, task, data}, required"},
+      "output": {},
+      "notes": "Every mutating verb self-appends to run-log.jsonl in the same state-ref commit (§7.2: one commit per verb, card mutation + event line atomically). This verb exists for out-of-band events; it is the audit substrate and required even when the backend has its own trail."
+    }
+  },
+  "optional_capabilities": {
+    "lease-renew": {"args": {"task": "required", "token": "required", "lease": "duration"}, "output": {"lease_expires": "RFC3339"}, "notes": "Required capability of the filecards backend."},
+    "ancestry": {"args": {"task": "required"}, "output": {"chain": "[task ids root-first]"}},
+    "dep": {"args": {"add/remove": "edge spec"}, "output": {}},
+    "event-emit": {"args": {"sink": "url", "event": "object"}, "output": {}},
+    "wake": {"args": {"actor": "required"}, "output": {}},
+    "budget": {"args": {"check/report": "actor, amounts"}, "output": {"remaining": "advisory on file backends"}},
+    "watch": {"args": {"filter": "state/squad"}, "output": "stream"},
+    "ready_squad": {"notes": "ready --squad server-side filtering (erratum item 5)."}
+  }
+}

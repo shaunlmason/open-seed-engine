@@ -1,0 +1,21 @@
+{
+  "$comment": "Normative port contract header. Authority: docs/design-options.md D1/§7.1/§7.5. The engine refuses to operate when protocol_version differs from .seed/version (exit 10).",
+  "schema_version": "1.0",
+  "protocol_version": 1,
+  "states": ["backlog", "ready", "in_progress", "review", "done", "blocked", "cancelled"],
+  "terminal_states": ["done"],
+  "reinstatable_states": ["cancelled"],
+  "claim_bearing_states": ["in_progress"],
+  "exit_codes": {
+    "0": {"name": "ok", "meaning": "verb succeeded"},
+    "2": {"name": "claim_not_granted", "meaning": "claim contention (task already claimed) or rejected_author lockout; distinguish via the error field"},
+    "3": {"name": "invalid_transition", "meaning": "transition not present in the D1 edge table, or verb applied in a state it is not legal in"},
+    "4": {"name": "not_found", "meaning": "task id does not resolve"},
+    "5": {"name": "backend_unavailable", "meaning": "backend cannot be reached (offline vs server backend); triggers configured fallback"},
+    "6": {"name": "fenced_out", "meaning": "worker verb presented a stale or missing claim token (reaped predecessor, rotated fence)"},
+    "10": {"name": "version_mismatch", "meaning": "port schema/protocol version mismatch between shim, spec files, and backend"}
+  },
+  "non_port_exit_codes": {
+    "64": {"name": "usage", "meaning": "CLI usage error (EX_USAGE); never emitted as a port verb result"}
+  }
+}

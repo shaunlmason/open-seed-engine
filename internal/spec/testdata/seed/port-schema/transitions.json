@@ -1,0 +1,81 @@
+{
+  "$comment": "The D1 edge table with §7.1 verb classes, as data. Every legal transition appears exactly once and carries exactly one class. Worker rows require the current claim token (requires_token) except claim, which mints it. Effects are the shim-written side effects defined in §7.1/D1 — there is no free-form field-set verb.",
+  "schema_version": "1.0",
+  "effect_vocabulary": {
+    "mint_token": "issue a fresh claim token and write the card's claim block",
+    "set_lease": "set lease_expires from --lease (default from config); leases apply only to in_progress",
+    "end_claim": "clear the card's claim block and lease",
+    "write_handoff": "write the machine-generated handoff stub to handoff/<task-id>.md on the state ref",
+    "record_review": "write the card's review block (reviewer identity, timestamp, evidence reference)",
+    "append_rejected_author": "append the rejected implementer to rejected_authors",
+    "cascade": "blocker-cascade: remove dep:<this-id> from every card's blocked_on; each card whose set empties transitions blocked→ready via the dep_cascade auto-path",
+    "add_blocked_on": "add the entry named by the verb's arguments to blocked_on (plan:<pr> | dep:<task-id> | manual:<operator>)",
+    "remove_blocked_on_manual": "remove this operator's manual: entry from blocked_on"
+  },
+  "transitions": [
+    {"from": "backlog", "to": "ready", "verb": "promote", "class": "operator", "effects": []},
+    {"from": "backlog", "to": "cancelled", "verb": "cancel", "class": "operator", "effects": ["cascade"]},
+
+    {"from": "ready", "to": "in_progress", "verb": "claim", "class": "worker", "requires_token": false,
+     "effects": ["mint_token", "set_lease"],
+     "preconditions": [
+       {"name": "not_rejected_author", "fail_error": "rejected_author", "fail_exit": 2},
+       {"name": "unclaimed", "fail_error": "claim_contention", "fail_exit": 2}
+     ],
+     "notes": "Token-minting bootstrap exception (§7.1): presents no token. Synchronous — the claim commit is pushed inside the verb; push rejection re-fetches and re-checks. A claim on an unplanned card authorizes planning only."},
+    {"from": "ready", "to": "backlog", "verb": "deprioritize", "class": "operator", "effects": []},
+    {"from": "ready", "to": "blocked", "verb": "block", "class": "operator", "effects": ["add_blocked_on"],
+     "notes": "Manual blocking of unclaimed cards only (§7.1)."},
+    {"from": "ready", "to": "cancelled", "verb": "cancel", "class": "operator", "effects": ["cascade"]},
+
+    {"from": "in_progress", "to": "review", "verb": "transition", "class": "worker", "requires_token": true,
+     "effects": ["end_claim"]},
+    {"from": "in_progress", "to": "ready", "verb": "transition", "class": "worker", "requires_token": true,
+     "effects": ["end_claim", "write_handoff"],
+     "operator_overrides": [
+       {"name": "reap", "guard": "lease_expired",
+        "effects": ["end_claim", "write_handoff"],
+        "notes": "Maintenance reap (§7.1): a release, not a rejection — rejected_authors untouched. Legal only when the lease is expired."}
+     ]},
+    {"from": "in_progress", "to": "blocked", "verb": "transition", "class": "worker", "requires_token": true,
+     "effects": ["end_claim", "write_handoff", "add_blocked_on"],
+     "notes": "Plan parking (D1) uses this edge with a plan:<pr> entry, strictly PR-first."},
+    {"from": "in_progress", "to": "cancelled", "verb": "cancel", "class": "operator",
+     "effects": ["end_claim", "write_handoff", "cascade"],
+     "notes": "Operator cancel clears the live claim and lease as a defined side effect (§7.1)."},
+
+    {"from": "blocked", "to": "ready", "verb": "unblock", "class": "operator",
+     "effects": ["remove_blocked_on_manual"],
+     "guard": "blocked_on_empty_after_removal",
+     "auto_paths": [
+       {"name": "dep_cascade", "removes": "dep:", "trigger": "close or cancel of the blocking task"},
+       {"name": "plan_unblock", "removes": "plan:", "trigger": "maintenance observes the plan PR merged or closed (state-shaped, not event-shaped)"}
+     ],
+     "notes": "Each path removes only its own blocked_on entry; the transition fires only when the set empties. Auto-paths run shim-mediated under an operator credential."},
+    {"from": "blocked", "to": "cancelled", "verb": "cancel", "class": "operator", "effects": ["cascade"]},
+
+    {"from": "review", "to": "done", "verb": "accept", "class": "operator", "effects": ["record_review"]},
+    {"from": "review", "to": "ready", "verb": "reject", "class": "operator",
+     "effects": ["append_rejected_author", "record_review"]},
+    {"from": "review", "to": "cancelled", "verb": "cancel", "class": "operator", "effects": ["cascade"]},
+
+    {"from": "cancelled", "to": "backlog", "verb": "reinstate", "class": "operator", "effects": []}
+  ],
+  "composite_verbs": {
+    "close": {
+      "expands_to": "accept",
+      "adds_effects": ["cascade"],
+      "notes": "close = accept + blocker-cascade, valid only from review (any other state is exit 3). Normative sequence: server PR approval → merge → close (§7.1)."
+    },
+    "release": {
+      "expands_to": "transition",
+      "fixed_to": "ready",
+      "notes": "Convenience name for the worker release edge in_progress→ready."
+    }
+  },
+  "worker_verbs_outside_table": {
+    "comment": {"requires_token_when_claimed": true, "notes": "Fenced while the card holds a claim; unfenced on unclaimed cards."},
+    "attach-evidence": {"requires_token_when_claimed": true, "notes": "Append-only. Fenced while the card holds a claim."},
+    "lease-renew": {"requires_token": true, "legal_states": ["in_progress"], "notes": "Required capability of the filecards backend; loop runner renews at half-lease cadence."}
+  }
+}

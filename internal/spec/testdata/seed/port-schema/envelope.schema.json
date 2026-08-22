@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-seed.dev/port-schema/envelope.schema.json",
+  "title": "Port response envelope",
+  "description": "Every `seed task <verb> --json` invocation emits exactly one envelope on stdout. The shim validates backend output against this schema before anything reaches an agent (research/10 §5.5): unknown fields are dropped, oversize responses truncated, type errors are exit 10 and the response is discarded.",
+  "type": "object",
+  "required": ["ok", "schema_version"],
+  "properties": {
+    "ok": {"type": "boolean"},
+    "schema_version": {"type": "string", "pattern": "^1\\.[0-9]+$"},
+    "verb": {"type": "string"},
+    "task": {"type": "string", "description": "Opaque task id"},
+    "state": {"enum": ["backlog", "ready", "in_progress", "review", "done", "blocked", "cancelled"]},
+    "actor": {"type": "string"},
+    "claim_token": {"type": "string"},
+    "lease_expires": {"type": "string", "format": "date-time"},
+    "holder": {"type": "string", "description": "On claim_contention: current claim holder"},
+    "cascaded": {"type": "array", "items": {"type": "string"}},
+    "tasks": {"type": "array", "items": {"type": "object"}},
+    "card": {"type": "object"},
+    "data": {"type": "object", "description": "Verb-specific payload not covered by a named field"},
+    "error": {
+      "type": "string",
+      "description": "Machine-readable error name; present iff ok=false. The exit code carries the class (port.json); this string carries the specific cause.",
+      "examples": ["claim_contention", "rejected_author", "invalid_transition", "fenced_out", "not_found", "backend_unavailable", "version_mismatch", "halted"]
+    },
+    "message": {"type": "string", "description": "Human-readable elaboration; data, not instructions"}
+  },
+  "allOf": [
+    {"if": {"properties": {"ok": {"const": false}}}, "then": {"required": ["error"]}}
+  ]
+}
