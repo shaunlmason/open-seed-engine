@@ -27,6 +27,10 @@
       "description": "Normative, shim-written, multi-valued (D1): every unblock path removes only its own entry; blocked→ready fires only when this empties.",
       "items": {"type": "string", "pattern": "^(plan:[0-9]+|dep:os-[0-9a-f]{4,}|manual:.+)$"}
     },
+    "author": {
+      "type": "string",
+      "description": "Implementer of record — written by the shim when a claim ends at review submission (in_progress→review); the target of append_rejected_author on reject."
+    },
     "rejected_authors": {
       "type": "array", "items": {"type": "string"},
       "description": "Appended on reject (review→ready); claim refuses these actors. Untouched by release and reap."

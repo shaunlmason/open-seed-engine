@@ -41,11 +41,22 @@ func TestUnknownAndMissingCommandExitUsage(t *testing.T) {
 	}
 }
 
-func TestVersionStringContainsDefaults(t *testing.T) {
-	s := versionString()
+func TestVersionOutputContainsDefaults(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if got := run([]string{"version"}, f, f); got != 0 {
+		t.Fatalf("run(version) = %d", got)
+	}
+	b, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{"seed", version, commit} {
-		if !strings.Contains(s, want) {
-			t.Errorf("versionString() = %q, missing %q", s, want)
+		if !strings.Contains(string(b), want) {
+			t.Errorf("version output %q missing %q", b, want)
 		}
 	}
 }
