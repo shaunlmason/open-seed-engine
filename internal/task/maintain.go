@@ -152,8 +152,14 @@ func (sv *Service) Report(stalledAfter time.Duration) *Result {
 			}
 		}
 	}
-	return ok(map[string]any{"verb": "report", "states": states,
-		"expired_leases": expired, "stalled_reviews": stalled, "long_parked_plans": parked})
+	fields := map[string]any{"verb": "report", "states": states,
+		"expired_leases": expired, "stalled_reviews": stalled, "long_parked_plans": parked}
+	// Stale-mail visibility (plan os-499c5978): unread counts per actor
+	// ride the maintenance report.
+	if r := sv.MailUnreadCounts(); r.Code == 0 {
+		fields["mail_unread"] = r.Fields["unread"]
+	}
+	return ok(fields)
 }
 
 func hasPlanEntry(c *card.Card) bool {
