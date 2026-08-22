@@ -71,6 +71,8 @@ func run(args []string, stdout, stderr *os.File) int {
 		return runState(args[1:], stdout, stderr)
 	case "maintain":
 		return runMaintain(args[1:], stdout, stderr)
+	case "mirror":
+		return runMirror(args[1:], stdout, stderr)
 	case "task":
 		return runTask(args[1:], stdout, stderr)
 	default:
@@ -103,6 +105,8 @@ commands:
   state anchor                 tag the state head as seed-anchor/<ts> and push
   maintain reap --actor A      release every expired lease (handoff stubs)
   maintain report              per-state counts, expired leases, stalled reviews
+  mirror plan                  compute one-way issue-export actions (read-only)
+  mirror record <id> --issue N --state S --actor A   store a card↔issue mapping
   task <verb> ...              port verbs (JSON envelope on stdout):
     create --title T [--body B] [--priority P2] [--squad S] [--parent ID]
            [--label L]... [--blocks ID]... [--blocked-by ID]... --actor A
@@ -206,6 +210,38 @@ func runMaintain(args []string, stdout, stderr *os.File) int {
 		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.ReapExpired(*actor) })
 	case "report":
 		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Report(*stalled) })
+	default:
+		usage(stderr)
+		return exitUsage
+	}
+}
+
+func runMirror(args []string, stdout, stderr *os.File) int {
+	if len(args) == 0 {
+		usage(stderr)
+		return exitUsage
+	}
+	switch args[0] {
+	case "plan":
+		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.MirrorPlan() })
+	case "record":
+		if len(args) < 2 {
+			usage(stderr)
+			return exitUsage
+		}
+		id := args[1]
+		fs := flag.NewFlagSet("mirror record", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		issue := fs.Int("issue", 0, "issue number")
+		state := fs.String("state", "", "card state at export")
+		actor := fs.String("actor", "", "operator actor")
+		if fs.Parse(args[2:]) != nil || *issue == 0 || *state == "" || *actor == "" {
+			fmt.Fprintln(stderr, "seed mirror record: <id> --issue N --state S --actor A required")
+			return exitUsage
+		}
+		return withService(stdout, stderr, func(sv *task.Service) *task.Result {
+			return sv.MirrorRecord(id, *issue, *state, *actor)
+		})
 	default:
 		usage(stderr)
 		return exitUsage

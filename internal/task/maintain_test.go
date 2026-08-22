@@ -1,6 +1,7 @@
 package task
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -205,4 +206,33 @@ func lintFailuresContain(r *Result, substr string) bool {
 		}
 	}
 	return false
+}
+
+// Mirror record round-trip: mapping written one-commit-per-verb with an
+// event; MirrorPlan reflects it (idempotence via exported state).
+func TestMirrorPlanAndRecord(t *testing.T) {
+	h := newHarness(t)
+	a := h.clone("a")
+	mustOK(t, a.Init())
+	id := createReady(t, a, "mirrored card")
+
+	r := mustOK(t, a.MirrorPlan())
+	actions, _ := json.Marshal(r.Fields["actions"])
+	if !strings.Contains(string(actions), `"op":"create"`) || !strings.Contains(string(actions), id) {
+		t.Fatalf("plan = %s", actions)
+	}
+	if rr := a.MirrorRecord(id, 42, "ready", "nobody"); rr.Code == 0 {
+		t.Fatal("non-operator record accepted")
+	}
+	mustOK(t, a.MirrorRecord(id, 42, "ready", "lead"))
+	r = mustOK(t, a.MirrorPlan())
+	actions, _ = json.Marshal(r.Fields["actions"])
+	if string(actions) != "[]" {
+		t.Fatalf("recorded card still planned: %s", actions)
+	}
+	head, _ := a.Store.Sync()
+	log, _, _ := a.Store.ReadFile(head, "run-log.jsonl")
+	if !strings.Contains(log, `"verb":"mirror-record"`) {
+		t.Fatal("mirror-record event missing from run log")
+	}
 }
