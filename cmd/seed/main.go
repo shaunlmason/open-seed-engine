@@ -23,6 +23,7 @@ import (
 	"github.com/shaunlmason/open-seed-engine/internal/spec"
 	seedsync "github.com/shaunlmason/open-seed-engine/internal/sync"
 	"github.com/shaunlmason/open-seed-engine/internal/task"
+	"github.com/shaunlmason/open-seed-engine/internal/upgrade"
 	"github.com/shaunlmason/open-seed-engine/internal/validate"
 )
 
@@ -64,6 +65,8 @@ func run(args []string, stdout, stderr *os.File) int {
 		return runSync(args[1:], stdout, stderr)
 	case "backend":
 		return runBackend(args[1:], stdout, stderr)
+	case "upgrade":
+		return runUpgrade(args[1:], stdout, stderr)
 	case "init":
 		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Init() })
 	case "init-github":
@@ -98,6 +101,11 @@ commands:
   sync [--check]               regenerate fan-outs (.claude/agents|skills,
                                .agents/skills, AGENTS.md rules block); --check
                                fails on drift (offline; runs in CI — R1)
+  upgrade [--to vX.Y.Z] [--check] [--assume-protocol-ok]
+                               move the engine pin in .seed/engine.lock against
+                               a tagged release (verified checksums + protocol
+                               preflight; never touches git — exit map 0 ok,
+                               1 refusal, 7 release host unreachable)
   init                         create the seed-state ref (orphan; race-safe)
   init-github                  print the server-side protection checklist
   state resume --actor A       clear the HALT marker (operator)
@@ -162,6 +170,46 @@ func withService(stdout, stderr *os.File, f func(*task.Service) *task.Result) in
 		return spec.ExitVersionMismatch
 	}
 	return emit(stdout, f(sv))
+}
+
+// runUpgrade is not a port verb: it has its own exit map (0/1/7/64) and
+// bypasses the task service (it must run even when the pinned engine and
+// spec would disagree — that disagreement is what it fixes).
+func runUpgrade(args []string, stdout, stderr *os.File) int {
+	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	to := fs.String("to", "", "explicit target tag (permits rollback)")
+	check := fs.Bool("check", false, "report current vs target without writing")
+	assume := fs.Bool("assume-protocol-ok", false, "proceed when the release predates protocol.txt")
+	if fs.Parse(args) != nil {
+		return exitUsage
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintln(stderr, "seed:", err)
+		return exitUsage
+	}
+	root, found := config.FindRoot(cwd)
+	if !found {
+		fmt.Fprintln(stderr, "seed: no .seed directory found (run from an open-seed repo)")
+		return exitUsage
+	}
+	res, uerr := upgrade.Run(upgrade.Options{
+		Root: root, To: *to, Check: *check, AssumeProtocolOK: *assume,
+		BaseURL: os.Getenv("SEED_UPGRADE_BASE_URL"),
+	})
+	if uerr != nil {
+		b, _ := json.Marshal(map[string]any{"ok": false, "schema_version": "1.0", "verb": "upgrade",
+			"error": uerr.Name, "message": uerr.Msg})
+		fmt.Fprintln(stdout, string(b))
+		return uerr.Code
+	}
+	b, _ := json.Marshal(map[string]any{"ok": true, "schema_version": "1.0", "verb": "upgrade",
+		"current": res.Current, "target": res.Target, "up_to_date": res.UpToDate,
+		"written": res.Written, "release_url": res.ReleaseURL,
+		"notes": res.Notes, "next_steps": res.NextSteps})
+	fmt.Fprintln(stdout, string(b))
+	return 0
 }
 
 func runState(args []string, stdout, stderr *os.File) int {
