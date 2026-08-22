@@ -99,3 +99,35 @@ func TestCheckCatchesFanOutEdit(t *testing.T) {
 		t.Fatalf("drift not caught: %v", errs)
 	}
 }
+
+// Managed skills (skills/managed/<name>, plan os-6f3104db) fan out at
+// the same depth as local ones; a local skill with the same name wins.
+func TestManagedSkillsFanOutFlat(t *testing.T) {
+	root := setup(t)
+	write := func(p, c string) {
+		full := filepath.Join(root, p)
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		if err := os.WriteFile(full, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("skills/managed/shared/SKILL.md", "# shared\n\nFrom upstream.\n")
+	write("skills/managed/shared/helper.sh", "echo shared\n")
+	write("skills/managed/greet/SKILL.md", "# greet (managed)\n\nShould lose to local.\n")
+	if _, err := Apply(root); err != nil {
+		t.Fatal(err)
+	}
+	for _, dst := range []string{".claude/skills", ".agents/skills"} {
+		b, err := os.ReadFile(filepath.Join(root, dst, "shared", "SKILL.md"))
+		if err != nil || !strings.Contains(string(b), "From upstream") {
+			t.Fatalf("%s: managed skill not flat: %v %q", dst, err, b)
+		}
+		if _, err := os.Stat(filepath.Join(root, dst, "managed")); !os.IsNotExist(err) {
+			t.Fatalf("%s: managed/ segment leaked into the fan-out", dst)
+		}
+		b, _ = os.ReadFile(filepath.Join(root, dst, "greet", "SKILL.md"))
+		if !strings.Contains(string(b), "Say hi") {
+			t.Fatalf("%s: local skill did not win the name collision: %q", dst, b)
+		}
+	}
+}

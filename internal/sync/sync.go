@@ -80,7 +80,11 @@ func copyTree(root, srcDir string, dstDirs []string, suffix, skip string) ([]Act
 }
 
 // copySkills fans out each skills/<name>/ directory (all files) to both
-// harness locations.
+// harness locations. Managed skills (skills/managed/<name>, installed by
+// `seed skills install` — plan os-6f3104db) fan out exactly like local
+// ones: the managed/ segment is stripped so harnesses discover them at
+// the same depth. Managed entries are emitted first, so a local skill
+// with the same name wins.
 func copySkills(root string) ([]Action, error) {
 	src := filepath.Join(root, "skills")
 	entries, err := os.ReadDir(src)
@@ -91,15 +95,12 @@ func copySkills(root string) ([]Action, error) {
 		return nil, err
 	}
 	var actions []Action
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		err := filepath.WalkDir(filepath.Join(src, e.Name()), func(p string, d os.DirEntry, err error) error {
+	emit := func(dir, name string) error {
+		return filepath.WalkDir(filepath.Join(dir, name), func(p string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return err
 			}
-			rel, err := filepath.Rel(src, p)
+			rel, err := filepath.Rel(dir, p)
 			if err != nil {
 				return err
 			}
@@ -112,7 +113,23 @@ func copySkills(root string) ([]Action, error) {
 			}
 			return nil
 		})
-		if err != nil {
+	}
+	managed := filepath.Join(src, "managed")
+	if mEntries, err := os.ReadDir(managed); err == nil {
+		for _, e := range mEntries {
+			if !e.IsDir() {
+				continue
+			}
+			if err := emit(managed, e.Name()); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "managed" {
+			continue
+		}
+		if err := emit(src, e.Name()); err != nil {
 			return nil, err
 		}
 	}
