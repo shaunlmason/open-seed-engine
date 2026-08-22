@@ -581,16 +581,22 @@ func runSync(args []string, stdout, stderr *os.File) int {
 }
 
 func runInitGithub(stdout, stderr *os.File) int {
-	fmt.Fprint(stdout, `seed init-github — server-side protections for the seed-state ref (§7.2):
+	fmt.Fprint(stdout, `seed init-github — the server-side protections that make the gates real:
 
-  1. Branch protection / ruleset on 'seed-state':
+  1. Branch protection on 'main' (the merge gates):
+     - require the check-validate checks ('check', 'verify') and a review
+     - require conversation resolution before merging — review threads
+       must be resolved before merge, so review fixes cannot be stranded
+       behind an early merge
+     - no force pushes
+  2. Branch protection / ruleset on 'seed-state':
      - allow pushes (contributors by default; see hardening below)
      - BLOCK force pushes and deletion
-  2. Tag protection rule for 'seed-anchor/*':
+  3. Tag protection rule for 'seed-anchor/*':
      - create-only for the maintenance workflow credential; no deletion
-  3. Hardening option (Q5): restrict 'seed-state' pushes to a dedicated
+  4. Hardening option (Q5): restrict 'seed-state' pushes to a dedicated
      machine identity (fine-grained PAT or deploy key) plus squad leads.
-  4. Never grant any scheduled job push access to the default branch (D4.3).
+  5. Never grant any scheduled job push access to the default branch (D4.3).
 
 The engine cannot call the GitHub API; apply these in repo settings, then
 verify the ref exists with: git ls-remote origin seed-state
