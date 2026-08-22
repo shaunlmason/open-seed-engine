@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shaunlmason/open-seed-engine/internal/backend"
 	"github.com/shaunlmason/open-seed-engine/internal/config"
 	"github.com/shaunlmason/open-seed-engine/internal/gitx"
 	"github.com/shaunlmason/open-seed-engine/internal/plan"
@@ -60,6 +61,8 @@ func run(args []string, stdout, stderr *os.File) int {
 		return runValidate(stdout, stderr)
 	case "sync":
 		return runSync(args[1:], stdout, stderr)
+	case "backend":
+		return runBackend(args[1:], stdout, stderr)
 	case "init":
 		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Init() })
 	case "init-github":
@@ -88,6 +91,7 @@ commands:
   receipt generate <task> --base <ref> [--run] [--by <name>] [--write]
   receipt verify <task> --base <ref> --branch <head-branch> [--run] [--write]
   validate                     lint guardrails, teams, role variants, plans
+  backend verify <name>        manifest + lock-hash check for a backend plugin
   sync [--check]               regenerate fan-outs (.claude/agents|skills,
                                .agents/skills, AGENTS.md rules block); --check
                                fails on drift (offline; runs in CI — R1)
@@ -218,6 +222,27 @@ func runTask(args []string, stdout, stderr *os.File) int {
 	if len(args) == 0 {
 		usage(stderr)
 		return exitUsage
+	}
+	// External-backend dispatch (§7.1): when the configured backend's manifest
+	// entry is not builtin, every task verb is executed by the plugin — the
+	// shim only verifies, sandboxes, and validates.
+	if cwd, err := os.Getwd(); err == nil {
+		if root, found := config.FindRoot(cwd); found {
+			if cfg, err := config.Load(filepath.Join(root, ".seed")); err == nil && cfg.Coordination.Backend != "" {
+				if m, err := backend.Load(root, cfg.Coordination.Backend); err == nil && m.Entry != "builtin" {
+					out, code, execErr := backend.Exec(root, m, append(slicesClone(args), "--json"))
+					if execErr != nil {
+						fmt.Fprintln(stderr, "seed task:", execErr)
+						return code
+					}
+					fmt.Fprint(stdout, out)
+					return code
+				} else if err != nil && cfg.Coordination.Backend != "filecards" {
+					fmt.Fprintln(stderr, "seed task:", err)
+					return spec.ExitUnavailable
+				}
+			}
+		}
 	}
 	verb := args[0]
 	rest := args[1:]
@@ -459,6 +484,36 @@ func runValidate(stdout, stderr *os.File) int {
 		return 1
 	}
 	fmt.Fprintln(stdout, "validate ok: guardrails, teams, role variants, plans")
+	return 0
+}
+
+func slicesClone(s []string) []string { return append([]string{}, s...) }
+
+// runBackend implements `seed backend verify <name>`: manifest + lock check
+// without invoking the plugin.
+func runBackend(args []string, stdout, stderr *os.File) int {
+	if len(args) < 2 || args[0] != "verify" {
+		usage(stderr)
+		return exitUsage
+	}
+	cwd, _ := os.Getwd()
+	root, found := config.FindRoot(cwd)
+	if !found {
+		fmt.Fprintln(stderr, "seed backend verify: no .seed directory found")
+		return 1
+	}
+	name := args[1]
+	m, err := backend.Load(root, name)
+	if err != nil {
+		fmt.Fprintln(stderr, "seed backend verify:", err)
+		return 1
+	}
+	if err := backend.VerifyLock(root, name); err != nil {
+		fmt.Fprintln(stderr, "seed backend verify:", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "backend %s ok: entry=%s schema=%s atomic_claim=%s offline=%s\n",
+		m.Name, m.Entry, m.SchemaVersion, m.Capabilities.AtomicClaim, m.Capabilities.Offline)
 	return 0
 }
 
