@@ -128,6 +128,7 @@ type Change struct {
 	Path    string
 	Content string
 	Delete  bool
+	Mode    string // index mode (100644, 100755, 120000); "" = 100644
 }
 
 // CommitTree builds a commit on top of parentTree (a treeish, or "" for an
@@ -164,7 +165,11 @@ func (r *Repo) CommitTree(parentTreeish string, parents []string, message string
 		if err != nil {
 			return "", err
 		}
-		if _, err := tmp.Git("update-index", "--add", "--cacheinfo", "100644,"+blob+","+filepath.ToSlash(c.Path)); err != nil {
+		mode := c.Mode
+		if mode == "" {
+			mode = "100644"
+		}
+		if _, err := tmp.Git("update-index", "--add", "--cacheinfo", mode+","+blob+","+filepath.ToSlash(c.Path)); err != nil {
 			return "", err
 		}
 	}

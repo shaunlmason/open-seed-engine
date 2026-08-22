@@ -406,3 +406,40 @@ func Run(opts Options) (*Result, *Err) {
 	}
 	return res, nil
 }
+
+// Shared release-resolution helpers (plan os-23494e11): `seed template
+// upgrade` resolves its target exactly as `seed upgrade` does — the same
+// no-follow redirect read, the same base-URL override rule, the same
+// semver gate — so the logic is exported here rather than duplicated.
+
+// ResolveBaseURL applies the HTTPS-or-loopback override rule to an
+// optional base-URL override ("" = https://github.com).
+func ResolveBaseURL(override string) (string, *Err) {
+	return baseURL(Options{BaseURL: override})
+}
+
+// ResolveLatest reads the latest release tag from the /releases/latest
+// redirect Location without following it.
+func ResolveLatest(base, repo string) (string, *Err) {
+	return resolveLatest(base, repo)
+}
+
+// CompareTags parses two vX.Y.Z tags and returns -1/0/1 for a<b, a==b,
+// a>b.
+func CompareTags(a, b string) (int, *Err) {
+	av, e := parseTag(a)
+	if e != nil {
+		return 0, e
+	}
+	bv, e := parseTag(b)
+	if e != nil {
+		return 0, e
+	}
+	switch {
+	case av.less(bv):
+		return -1, nil
+	case bv.less(av):
+		return 1, nil
+	}
+	return 0, nil
+}

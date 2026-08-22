@@ -67,6 +67,8 @@ func run(args []string, stdout, stderr *os.File) int {
 		return runBackend(args[1:], stdout, stderr)
 	case "upgrade":
 		return runUpgrade(args[1:], stdout, stderr)
+	case "template":
+		return runTemplate(args[1:], stdout, stderr)
 	case "init":
 		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Init() })
 	case "init-github":
@@ -106,6 +108,12 @@ commands:
                                a tagged release (verified checksums + protocol
                                preflight; never touches git — exit map 0 ok,
                                1 refusal, 7 release host unreachable)
+  template upgrade [--to vX.Y.Z] [--check]
+                               three-way merge a newer template release onto a
+                               new local branch template-upgrade/<tag> (base
+                               recorded in .seed/template.lock; work products
+                               never merged; no push, no PR — exit map 0 ok,
+                               1 refusal, 7 template host unreachable)
   init                         create the seed-state ref (orphan; race-safe)
   init-github                  print the server-side protection checklist
   state resume --actor A       clear the HALT marker (operator)
