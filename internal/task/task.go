@@ -18,6 +18,7 @@ import (
 
 	"github.com/shaunlmason/open-seed-engine/internal/card"
 	"github.com/shaunlmason/open-seed-engine/internal/config"
+	"github.com/shaunlmason/open-seed-engine/internal/fastcards"
 	"github.com/shaunlmason/open-seed-engine/internal/gitx"
 	"github.com/shaunlmason/open-seed-engine/internal/port"
 	"github.com/shaunlmason/open-seed-engine/internal/spec"
@@ -30,7 +31,7 @@ type Service struct {
 	Root  string
 	Spec  *spec.Spec
 	Cfg   *config.Config
-	Store *stateref.Store
+	Store stateref.Backing
 	Now   func() time.Time
 }
 
@@ -62,11 +63,25 @@ func NewService(root string) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Builtin store selection (§7.1 amendment): filecards is the git state
+	// ref; fastcards is the machine-local SQLite store. External backends
+	// never reach this constructor — the CLI dispatches them to their
+	// plugin first.
+	var store stateref.Backing
+	if cfg.Coordination.Backend == "fastcards" {
+		fc, err := fastcards.Open(root)
+		if err != nil {
+			return nil, err
+		}
+		store = fc
+	} else {
+		store = stateref.Open(root, cfg.Coordination.Remote, cfg.Coordination.StateBranch)
+	}
 	return &Service{
 		Root:  root,
 		Spec:  s,
 		Cfg:   cfg,
-		Store: stateref.Open(root, cfg.Coordination.Remote, cfg.Coordination.StateBranch),
+		Store: store,
 		Now:   time.Now,
 	}, nil
 }

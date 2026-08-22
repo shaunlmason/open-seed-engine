@@ -36,7 +36,11 @@ func (sv *Service) StateLint(haltOnFail bool, actor string) *Result {
 
 	var failures []string
 	failures = append(failures, sv.lintCards(head)...)
-	failures = append(failures, sv.replay(head)...)
+	if _, isGit := sv.Store.(*stateref.Store); isGit {
+		failures = append(failures, sv.replay(head)...)
+	}
+	// Non-git stores have no commit history: the replay lint does not apply
+	// (declared variance — machine-local trust), the card lints still do.
 
 	if len(failures) == 0 {
 		return ok(map[string]any{"verb": "state-lint", "head": head})
@@ -130,7 +134,11 @@ func (sv *Service) lintDone(c *card.Card) []string {
 // change against the transition table, and that mutating commits append to
 // the run log — hand-editing the ref cannot produce a legal-looking history.
 func (sv *Service) replay(head string) []string {
-	repo := sv.Store.Repo
+	gitStore, isGit := sv.Store.(*stateref.Store)
+	if !isGit {
+		return nil // no commit history to replay (guarded by the caller too)
+	}
+	repo := gitStore.Repo
 	out, err := repo.Git("rev-list", "--first-parent", fmt.Sprintf("--max-count=%d", replayLimit), head)
 	if err != nil {
 		return []string{"rev-list: " + err.Error()}

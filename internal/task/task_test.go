@@ -69,7 +69,7 @@ func (h *harness) clone(name string) *Service {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	sv.Store.Sleep = func(time.Duration) {}
+	sv.Store.(*stateref.Store).Sleep = func(time.Duration) {}
 	return sv
 }
 

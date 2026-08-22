@@ -43,6 +43,22 @@ type Terminal struct {
 
 func (t *Terminal) Error() string { return t.Name }
 
+// Backing is the storage contract the task layer runs on — implemented by
+// this git state-ref store and by builtin alternatives (fastcards' SQLite
+// store). One atomic unit per verb: Mutate's build func reads fresh state at
+// the given head and either returns the changes to commit or refuses with a
+// *Terminal decided on that state.
+type Backing interface {
+	Init() (string, error)
+	Sync() (string, error)
+	Halted(head string) (bool, string)
+	ReadFile(head, path string) (string, bool, error)
+	ListDir(head, dir string) ([]string, error)
+	// ListAll returns every stored path (recursive) — the export surface.
+	ListAll(head string) ([]string, error)
+	Mutate(checkHalt bool, build func(head string) (*Mutation, error)) (string, error)
+}
+
 type Store struct {
 	Repo   *gitx.Repo
 	Remote string
@@ -52,6 +68,8 @@ type Store struct {
 	// Sleep is swappable for tests.
 	Sleep func(time.Duration)
 }
+
+var _ Backing = (*Store)(nil)
 
 func Open(repoDir, remote, branch string) *Store {
 	return &Store{
@@ -161,6 +179,18 @@ func (s *Store) ReadFile(head, path string) (string, bool, error) {
 
 func (s *Store) ListDir(head, dir string) ([]string, error) {
 	return s.Repo.ListTree(head, dir)
+}
+
+// ListAll returns every path in the tree at head (export surface).
+func (s *Store) ListAll(head string) ([]string, error) {
+	out, err := s.Repo.Git("ls-tree", "-r", "--name-only", head)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(out) == "" {
+		return nil, nil
+	}
+	return strings.Split(strings.TrimSpace(out), "\n"), nil
 }
 
 // Mutation is what one verb wants committed: a message, file changes, and

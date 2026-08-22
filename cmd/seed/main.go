@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,6 +104,8 @@ commands:
   state lint [--halt-on-fail] [--actor A]   card lint + done-consistency +
                                transition-table replay; failure writes HALT
   state anchor                 tag the state head as seed-anchor/<ts> and push
+  state export                 dump the whole store as one JSON document
+  state import <file|->        load an export into a fresh store (operator)
   maintain reap --actor A      release every expired lease (handoff stubs)
   maintain report              per-state counts, expired leases, stalled reviews
   mirror plan                  compute one-way issue-export actions (read-only)
@@ -183,6 +186,22 @@ func runState(args []string, stdout, stderr *os.File) int {
 		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.StateLint(*haltOnFail, *actor) })
 	case "anchor":
 		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Anchor() })
+	case "export":
+		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Export() })
+	case "import":
+		rest := fs.Args()
+		var raw []byte
+		var err error
+		if len(rest) == 0 || rest[0] == "-" {
+			raw, err = io.ReadAll(os.Stdin)
+		} else {
+			raw, err = os.ReadFile(rest[0])
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "seed state import: %v\n", err)
+			return exitUsage
+		}
+		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Import(raw, *actor) })
 	default:
 		usage(stderr)
 		return exitUsage

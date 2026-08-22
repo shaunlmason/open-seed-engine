@@ -94,15 +94,23 @@ func (sv *Service) PlanUnblock(id string, pr int, actor string) *Result {
 // commits). Runs under the maintenance credential; the tag-protection rule
 // makes it create-only.
 func (sv *Service) Anchor() *Result {
+	gitStore, isGit := sv.Store.(*stateref.Store)
+	if !isGit {
+		// Machine-local stores have no remote to anchor against — the
+		// integrity story is local-filesystem trust (declared variance).
+		return failure(spec.ExitUnavailable, "anchors_not_applicable", map[string]any{
+			"detail": "anchors checkpoint the seed-state ref; the " + sv.Cfg.Coordination.Backend + " backend is machine-local (no remote, no tags)",
+		})
+	}
 	head, err := sv.Store.Sync()
 	if err != nil {
 		return errResult(err)
 	}
 	name := "seed-anchor/" + sv.Now().UTC().Format("20060102T150405Z")
-	if _, err := sv.Store.Repo.Git("tag", name, head); err != nil {
+	if _, err := gitStore.Repo.Git("tag", name, head); err != nil {
 		return errResult(err)
 	}
-	if _, err := sv.Store.Repo.Git("push", sv.Cfg.Coordination.Remote, "refs/tags/"+name); err != nil {
+	if _, err := gitStore.Repo.Git("push", sv.Cfg.Coordination.Remote, "refs/tags/"+name); err != nil {
 		return errResult(err)
 	}
 	return ok(map[string]any{"verb": "anchor", "tag": name, "head": head})
