@@ -25,6 +25,7 @@ import (
 	"github.com/shaunlmason/open-seed-engine/internal/port"
 	"github.com/shaunlmason/open-seed-engine/internal/spec"
 	"github.com/shaunlmason/open-seed-engine/internal/stateref"
+	"github.com/shaunlmason/open-seed-engine/internal/validate"
 )
 
 var blockedOnPattern = regexp.MustCompile(`^(plan:[0-9]+|dep:os-[0-9a-f]{4,}|manual:.+)$`)
@@ -194,6 +195,7 @@ func (sv *Service) Ready(actor, squad string) *Result {
 	if err != nil {
 		return errResult(err)
 	}
+	teams, _ := validate.LoadTeams(sv.Root)
 	var out []map[string]any
 	for _, c := range cards {
 		if c.State != "ready" || c.Claim != nil {
@@ -202,12 +204,13 @@ func (sv *Service) Ready(actor, squad string) *Result {
 		if actor != "" && slices.Contains(c.RejectedAuthors, actor) {
 			continue
 		}
-		if squad != "" && c.Squad != squad {
+		resolved := validate.ResolveSquad(c.Squad, c.Labels, teams)
+		if squad != "" && resolved != squad {
 			continue
 		}
 		out = append(out, map[string]any{
 			"task": c.ID, "title": c.Title, "priority": c.Priority,
-			"squad": c.Squad, "created_at": c.CreatedAt,
+			"squad": resolved, "created_at": c.CreatedAt,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -229,7 +232,9 @@ func (sv *Service) Get(id string) *Result {
 	if err != nil {
 		return errResult(err)
 	}
-	return ok(map[string]any{"verb": "get", "task": c.ID, "state": c.State, "card": c})
+	teams, _ := validate.LoadTeams(sv.Root)
+	return ok(map[string]any{"verb": "get", "task": c.ID, "state": c.State,
+		"squad": validate.ResolveSquad(c.Squad, c.Labels, teams), "card": c})
 }
 
 func (sv *Service) List(state string) *Result {
@@ -241,12 +246,14 @@ func (sv *Service) List(state string) *Result {
 	if err != nil {
 		return errResult(err)
 	}
+	teams, _ := validate.LoadTeams(sv.Root)
 	var out []map[string]any
 	for _, c := range cards {
 		if state != "" && c.State != state {
 			continue
 		}
-		out = append(out, map[string]any{"task": c.ID, "title": c.Title, "state": c.State, "priority": c.Priority})
+		out = append(out, map[string]any{"task": c.ID, "title": c.Title, "state": c.State, "priority": c.Priority,
+			"squad": validate.ResolveSquad(c.Squad, c.Labels, teams)})
 	}
 	return ok(map[string]any{"verb": "list", "tasks": out})
 }
@@ -460,25 +467,21 @@ func (sv *Service) cascade(head, closedID string, mut *stateref.Mutation) ([]str
 	return unblocked, nil
 }
 
+// handoffStub renders the write_handoff effect's packet via the shared
+// generator (plan os-499c5978, superseding the §7.1 v1 stub). A reap runs
+// in the maintenance checkout, not the worker's, so its packet marks the
+// workspace anchors unavailable; worker release/park observes its own
+// checkout.
 func (sv *Service) handoffStub(c *card.Card, prior *card.Claim, out port.Outcome, a TransitionArgs) string {
 	reason := a.Verb
 	if out.Override != "" {
 		reason = out.Override
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "# Handoff: %s\n\n", c.ID)
-	fmt.Fprintf(&b, "- reason: %s\n- at: %s\n- branch: seed/%s\n", reason, sv.now(), c.ID)
-	if prior != nil {
-		fmt.Fprintf(&b, "- prior_actor: %s\n- claimed_at: %s\n- lease_expires: %s\n", prior.Actor, prior.ClaimedAt, prior.LeaseExpires)
+	var anchors *wsAnchors
+	if out.Override != "reap" {
+		anchors = sv.collectAnchors()
 	}
-	if a.BlockedOn != "" {
-		fmt.Fprintf(&b, "- blocked_on: %s\n", a.BlockedOn)
-		if strings.HasPrefix(a.BlockedOn, "plan:") {
-			fmt.Fprintf(&b, "- salvageable: true\n")
-		}
-	}
-	b.WriteString("\nMachine-generated stub (§7.1 v1): the next claimant salvages or resets.\n")
-	return b.String()
+	return sv.renderPacket(c, reason, prior, anchors, a.BlockedOn)
 }
 
 // Comment and AttachEvidence are fenced while the card holds a claim.

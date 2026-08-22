@@ -3,6 +3,7 @@ package task
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // Mail contract (plan os-499c5978): one never-rewritten file per
@@ -102,4 +103,39 @@ func tokenOf(t *testing.T, sv *Service, id string) string {
 		t.Fatalf("no claim on %s", id)
 	}
 	return c.Claim.Token
+}
+
+// Reap runs in the maintenance checkout, so its packet must mark the
+// workspace anchors unavailable; a worker release observes its own
+// checkout (plan os-499c5978 as amended).
+func TestHandoffAnchorsByPath(t *testing.T) {
+	h := newHarness(t)
+	sv := h.clone("a")
+	mustOK(t, sv.Init())
+
+	reapID := createReady(t, sv, "reaped work")
+	mustOK(t, sv.Claim(reapID, "agent-a", "1m"))
+	later := time.Now().Add(2 * time.Hour)
+	sv.Now = func() time.Time { return later }
+	mustOK(t, sv.ReapExpired("lead"))
+	head, _ := sv.Store.Sync()
+	packet, found, _ := sv.Store.ReadFile(head, "handoff/"+reapID+".md")
+	if !found {
+		t.Fatal("reap wrote no packet")
+	}
+	if !strings.Contains(packet, "unavailable — claim reaped by maintenance") {
+		t.Fatalf("reap packet does not mark anchors unavailable:\n%s", packet)
+	}
+
+	relID := createReady(t, sv, "released work")
+	mustOK(t, sv.Claim(relID, "agent-b", ""))
+	mustOK(t, sv.Transition(TransitionArgs{Verb: "release", ID: relID, Actor: "agent-b", Token: tokenOf(t, sv, relID)}))
+	head, _ = sv.Store.Sync()
+	packet, found, _ = sv.Store.ReadFile(head, "handoff/"+relID+".md")
+	if !found {
+		t.Fatal("release wrote no packet")
+	}
+	if !strings.Contains(packet, "branch ") || strings.Contains(packet, "unavailable — claim reaped") {
+		t.Fatalf("release packet should carry real anchors:\n%s", packet)
+	}
 }
