@@ -514,17 +514,26 @@ func (r *runner) stubProduces(s *Step) error {
 }
 
 // genStub builds a minimal instance satisfying a (simple) JSON Schema:
-// required properties get zero values by type.
+// const/enum/default pin exact values; required properties get zero
+// values by type. Constraints beyond that (pattern, minLength, ...)
+// cannot be guessed — enforceProduces then fails the mock run visibly,
+// telling the author to pin a const/enum/default.
 func genStub(schema map[string]any) any {
 	if schema == nil {
 		return map[string]any{}
 	}
+	if c, ok := schema["const"]; ok {
+		return c
+	}
+	if enum, ok := schema["enum"].([]any); ok && len(enum) > 0 {
+		return enum[0]
+	}
+	if d, ok := schema["default"]; ok {
+		return d
+	}
 	t, _ := schema["type"].(string)
 	switch t {
 	case "string":
-		if enum, ok := schema["enum"].([]any); ok && len(enum) > 0 {
-			return enum[0]
-		}
 		return "mock"
 	case "integer", "number":
 		return 0

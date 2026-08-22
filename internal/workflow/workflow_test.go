@@ -489,3 +489,47 @@ func TestChecksGateHeldByUnresolvedThread(t *testing.T) {
 		t.Fatalf("resolved threads should open the gate: %v %+v", err, res2.Steps)
 	}
 }
+
+func TestStubHonorsConstEnumDefault(t *testing.T) {
+	root := mkroot(t)
+	writeWF(t, root, "pinned", hdr("pinned")+`steps:
+  - id: a
+    run: "true"
+    output_format:
+      type: object
+      required: [status, kind, count]
+      properties:
+        status: {type: string, const: ok}
+        kind: {type: string, enum: [alpha, beta]}
+        count: {type: integer, default: 7}
+    produces: [{name: v, file: artifacts/v.json}]
+`)
+	res, err := Run(RunOptions{Root: root, Name: "pinned", Mock: true})
+	if err != nil || res.Status != "succeeded" {
+		t.Fatalf("pinned-constraint stub failed: %v %+v", err, res)
+	}
+	raw, _ := os.ReadFile(filepath.Join(res.RunDir, "artifacts", "v.json"))
+	var v map[string]any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	if v["status"] != "ok" || v["kind"] != "alpha" || v["count"] != float64(7) {
+		t.Fatalf("stub values: %v", v)
+	}
+	// An unguessable constraint fails the mock run VISIBLY at the
+	// produce check rather than emitting an invalid artifact silently.
+	writeWF(t, root, "strict", hdr("strict")+`steps:
+  - id: a
+    run: "true"
+    output_format:
+      type: object
+      required: [token]
+      properties:
+        token: {type: string, pattern: "^tok-[0-9]+$"}
+    produces: [{name: v, file: artifacts/v.json}]
+`)
+	res, err = Run(RunOptions{Root: root, Name: "strict", Mock: true})
+	if err != nil || res.Status != "failed" || !strings.Contains(res.Steps["a"].Note, "schema") {
+		t.Fatalf("unguessable constraint not surfaced: %v %+v", err, res.Steps)
+	}
+}
