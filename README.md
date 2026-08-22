@@ -39,10 +39,9 @@ mistaken for a port result.
 
 ## Releasing
 
-Push a semver tag; the `release` workflow runs goreleaser across
-linux/darwin/windows × amd64/arm64, publishes archives + `checksums.txt`, and
-attests provenance.
-
-```sh
-git tag v0.1.0 && git push origin v0.1.0
-```
+Releases are driven by the `VERSION` file: bump it (e.g. to `v0.2.0`) and push to
+`main`. The `release` workflow mints the tag at HEAD in-runner — so the tag and
+the released commit can never disagree, and no contributor needs tag-push
+rights — then runs goreleaser across linux/darwin/windows × amd64/arm64,
+publishes archives + `checksums.txt`, and attests provenance.
+(`workflow_dispatch` with a `tag` input does the same manually.)

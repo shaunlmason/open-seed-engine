@@ -1,9 +1,12 @@
 name: release
 
+# Releases are driven by the VERSION file (or a manual dispatch), not by tag
+# pushes: the workflow mints the tag itself at HEAD, so the tag and the released
+# commit can never disagree, and no contributor needs tag-push rights.
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    paths: [VERSION]
   workflow_dispatch:
     inputs:
       tag:
@@ -23,11 +26,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Create tag (dispatch only)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Resolve and mint tag
         env:
-          TAG: ${{ inputs.tag }}
+          DISPATCH_TAG: ${{ inputs.tag }}
         run: |
+          if [ -n "$DISPATCH_TAG" ]; then TAG="$DISPATCH_TAG"; else TAG="$(tr -d '[:space:]' < VERSION)"; fi
+          case "$TAG" in v[0-9]*) ;; *) echo "invalid tag: $TAG"; exit 1;; esac
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag "$TAG"
