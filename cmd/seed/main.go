@@ -10,10 +10,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/shaunlmason/open-seed-engine/internal/config"
+	"github.com/shaunlmason/open-seed-engine/internal/gitx"
+	"github.com/shaunlmason/open-seed-engine/internal/plan"
+	"github.com/shaunlmason/open-seed-engine/internal/prclass"
+	"github.com/shaunlmason/open-seed-engine/internal/receipt"
 	"github.com/shaunlmason/open-seed-engine/internal/spec"
 	"github.com/shaunlmason/open-seed-engine/internal/task"
+	"github.com/shaunlmason/open-seed-engine/internal/validate"
 )
 
 // Injected by goreleaser via -ldflags at release time.
@@ -42,6 +48,14 @@ func run(args []string, stdout, stderr *os.File) int {
 		return 0
 	case "spec":
 		return runSpec(args[1:], stdout, stderr)
+	case "plan":
+		return runPlan(args[1:], stdout, stderr)
+	case "pr":
+		return runPR(args[1:], stdout, stderr)
+	case "receipt":
+		return runReceipt(args[1:], stdout, stderr)
+	case "validate":
+		return runValidate(stdout, stderr)
 	case "init":
 		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Init() })
 	case "init-github":
@@ -72,6 +86,11 @@ func usage(w *os.File) {
 commands:
   version                      print the engine version
   spec lint [dir]              validate the port spec (exit 10 on mismatch)
+  plan lint <path>             lint one plan file against the D3 grammar
+  pr classify <branch> [--files a,b,c]   classify a PR + check purity (D3)
+  receipt generate <task> --base <ref> [--run] [--by <name>] [--write]
+  receipt verify <task> --base <ref> --branch <head-branch> [--run] [--write]
+  validate                     lint guardrails, teams, role variants, plans
   init                         create the seed-state ref (orphan; race-safe)
   init-github                  print the server-side protection checklist
   state resume --actor A       clear the HALT marker (operator)
@@ -241,6 +260,139 @@ func runSpec(args []string, stdout, stderr *os.File) int {
 	}
 	fmt.Fprintf(stdout, "spec ok: protocol %d, %d states, %d transitions, %d composite verbs\n",
 		s.Port.ProtocolVersion, len(s.Port.States), len(s.Table.Transitions), len(s.Table.CompositeVerbs))
+	return 0
+}
+
+func runPlan(args []string, stdout, stderr *os.File) int {
+	if len(args) < 2 || args[0] != "lint" {
+		usage(stderr)
+		return exitUsage
+	}
+	b, err := os.ReadFile(args[1])
+	if err != nil {
+		fmt.Fprintln(stderr, "seed plan lint:", err)
+		return 1
+	}
+	if errs := plan.Lint(string(b)); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintf(stderr, "seed plan lint: %s: %v\n", args[1], e)
+		}
+		return 1
+	}
+	p := plan.Parse(string(b))
+	fmt.Fprintf(stdout, "plan ok: %d validation commands, sha256 %s\n", len(p.ValidationCommands), plan.Hash(string(b)))
+	return 0
+}
+
+func runPR(args []string, stdout, stderr *os.File) int {
+	if len(args) < 2 || args[0] != "classify" {
+		usage(stderr)
+		return exitUsage
+	}
+	branch := args[1]
+	fs := flag.NewFlagSet("pr classify", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	filesArg := fs.String("files", "", "comma-separated changed files for the purity check")
+	if fs.Parse(args[2:]) != nil {
+		return exitUsage
+	}
+	kind, taskID := prclass.Classify(branch)
+	fmt.Fprintf(stdout, "class=%s task=%s\n", kind, taskID)
+	if *filesArg != "" {
+		if err := prclass.CheckPurity(kind, taskID, strings.Split(*filesArg, ",")); err != nil {
+			fmt.Fprintln(stderr, "seed pr classify:", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "purity ok")
+	}
+	return 0
+}
+
+func runReceipt(args []string, stdout, stderr *os.File) int {
+	if len(args) < 2 {
+		usage(stderr)
+		return exitUsage
+	}
+	sub, taskID := args[0], args[1]
+	fs := flag.NewFlagSet("receipt "+sub, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	base := fs.String("base", "main", "base ref (the default branch)")
+	branch := fs.String("branch", "", "PR head branch (verify)")
+	runVal := fs.Bool("run", false, "execute the merge-base plan's validation commands")
+	write := fs.Bool("write", false, "write the regenerated receipt to receipts/<task>.json")
+	by := fs.String("by", "local", "generated_by identity")
+	if fs.Parse(args[2:]) != nil {
+		return exitUsage
+	}
+	cwd, _ := os.Getwd()
+	root, found := config.FindRoot(cwd)
+	if !found {
+		root = cwd
+	}
+	repo := &gitx.Repo{Dir: root}
+	opts := receipt.Options{RunValidation: *runVal, GeneratedBy: *by}
+
+	switch sub {
+	case "generate":
+		r, err := receipt.Generate(repo, taskID, *base, opts)
+		if err != nil {
+			fmt.Fprintln(stderr, "seed receipt generate:", err)
+			return 1
+		}
+		if *write {
+			if err := r.WriteFile(root); err != nil {
+				fmt.Fprintln(stderr, "seed receipt generate:", err)
+				return 1
+			}
+		}
+		b, _ := json.MarshalIndent(r, "", "  ")
+		fmt.Fprintln(stdout, string(b))
+		return 0
+	case "verify":
+		if *branch == "" {
+			fmt.Fprintln(stderr, "seed receipt verify: --branch required (the PR head branch; merge-queue callers derive it from the PR, never the merge-group ref)")
+			return exitUsage
+		}
+		rep, err := receipt.Verify(repo, taskID, *base, *branch, opts)
+		if err != nil {
+			fmt.Fprintln(stderr, "seed receipt verify:", err)
+			return 1
+		}
+		if *write && rep.Regenerated != nil {
+			if err := rep.Regenerated.WriteFile(root); err != nil {
+				fmt.Fprintln(stderr, "seed receipt verify:", err)
+				return 1
+			}
+		}
+		if !rep.OK {
+			for _, f := range rep.Failures {
+				fmt.Fprintln(stderr, "seed receipt verify: FAIL:", f)
+			}
+			return 1
+		}
+		fmt.Fprintf(stdout, "verify ok: plan %s, diff %s (%d files)\n",
+			rep.Regenerated.PlanSHA256[:12], rep.Regenerated.DiffSHA256[:12], len(rep.Regenerated.DiffFiles))
+		return 0
+	default:
+		usage(stderr)
+		return exitUsage
+	}
+}
+
+func runValidate(stdout, stderr *os.File) int {
+	cwd, _ := os.Getwd()
+	root, found := config.FindRoot(cwd)
+	if !found {
+		fmt.Fprintln(stderr, "seed validate: no .seed directory found")
+		return 1
+	}
+	if errs := validate.Repo(root); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintln(stderr, "seed validate:", e)
+		}
+		return 1
+	}
+	fmt.Fprintln(stdout, "validate ok: guardrails, teams, role variants, plans")
 	return 0
 }
 
