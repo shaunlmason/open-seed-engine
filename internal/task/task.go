@@ -7,6 +7,8 @@
 package task
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -480,11 +482,20 @@ func (sv *Service) handoffStub(c *card.Card, prior *card.Claim, out port.Outcome
 }
 
 // Comment and AttachEvidence are fenced while the card holds a claim.
+// Both mint a stable record id (verbs.json declares comment_id and
+// evidence_id as required outputs — plan os-61967950): the id is stamped
+// into the appended card-body section so it is resolvable by reading the
+// card, and returned in the envelope.
 func (sv *Service) Append(kind, id, actor, token, body, ref string) *Result {
 	verb := "comment"
+	idField := "comment_id"
+	prefix := "cm"
 	if kind != "comment" {
 		verb = "attach-evidence"
+		idField = "evidence_id"
+		prefix = "ev"
 	}
+	var recordID string
 	_, err := sv.Store.Mutate(true, func(head string) (*stateref.Mutation, error) {
 		c, err := sv.loadCard(head, id)
 		if err != nil {
@@ -493,12 +504,15 @@ func (sv *Service) Append(kind, id, actor, token, body, ref string) *Result {
 		if c.Claim != nil && token != c.Claim.Token {
 			return nil, &stateref.Terminal{Code: spec.ExitFenced, Name: "fenced_out"}
 		}
+		now := sv.now()
+		sum := sha256.Sum256([]byte(id + "\x00" + now + "\x00" + actor + "\x00" + body + ref + "\x00" + fmt.Sprint(len(c.Body))))
+		recordID = prefix + "-" + hex.EncodeToString(sum[:4])
 		if kind == "comment" {
-			c.Body += fmt.Sprintf("\n## Comment (%s, %s)\n\n%s\n", actor, sv.now(), body)
+			c.Body += fmt.Sprintf("\n## Comment %s (%s, %s)\n\n%s\n", recordID, actor, now, body)
 		} else {
-			c.Body += fmt.Sprintf("\n## Evidence (%s, %s, %s)\n\n%s\n", kind, actor, sv.now(), ref)
+			c.Body += fmt.Sprintf("\n## Evidence %s (%s, %s, %s)\n\n%s\n", recordID, kind, actor, now, ref)
 		}
-		c.UpdatedAt = sv.now()
+		c.UpdatedAt = now
 		content, err := c.Serialize()
 		if err != nil {
 			return nil, err
@@ -506,13 +520,13 @@ func (sv *Service) Append(kind, id, actor, token, body, ref string) *Result {
 		return &stateref.Mutation{
 			Message: verb + " " + id,
 			Changes: []gitx.Change{{Path: card.Path(id), Content: content}},
-			Events:  []string{sv.event(actor, verb, id, map[string]any{"kind": kind})},
+			Events:  []string{sv.event(actor, verb, id, map[string]any{"kind": kind, idField: recordID})},
 		}, nil
 	})
 	if err != nil {
 		return errResult(err)
 	}
-	return ok(map[string]any{"verb": verb, "task": id})
+	return ok(map[string]any{"verb": verb, "task": id, idField: recordID})
 }
 
 // LeaseRenew extends a live claim (worker verb outside the table; legal only
