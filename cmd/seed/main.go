@@ -77,6 +77,8 @@ func run(args []string, stdout, stderr *os.File) int {
 		return runMail(args[1:], stdout, stderr)
 	case "handoff":
 		return runHandoff(args[1:], stdout, stderr)
+	case "mcp":
+		return runMCP(args[1:], stdout, stderr)
 	case "init":
 		return withService(stdout, stderr, func(sv *task.Service) *task.Result { return sv.Init() })
 	case "init-github":
@@ -137,6 +139,9 @@ commands:
                                tmux poke, no-op without tmux)
   handoff generate <task> [--write]   render the mechanical continuation
                                packet (card + git anchors) to handoff/<task>.md
+  mcp serve                    MCP stdio transport: one tool per port verb,
+                               same service path as the CLI (which stays the
+                               source of truth)
   init                         create the seed-state ref (orphan; race-safe)
   init-github                  print the server-side protection checklist
   state resume --actor A       clear the HALT marker (operator)
