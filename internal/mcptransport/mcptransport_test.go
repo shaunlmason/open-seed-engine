@@ -132,7 +132,9 @@ func TestLifecycleOverMCP(t *testing.T) {
 		names[tl.(map[string]any)["name"].(string)] = true
 	}
 	for _, want := range []string{"task_create", "task_ready", "task_get", "task_list", "task_claim",
-		"task_release", "task_transition", "task_close", "task_comment", "task_attach_evidence", "task_plan_unblock", "task_promote", "task_reject"} {
+		"task_lease_renew", "task_release", "task_transition", "task_close", "task_comment",
+		"task_attach_evidence", "task_plan_unblock", "task_promote", "task_deprioritize",
+		"task_reject", "task_cancel", "task_reinstate", "task_block", "task_unblock"} {
 		if !names[want] {
 			t.Fatalf("tools/list missing %s: %v", want, names)
 		}
@@ -175,6 +177,9 @@ func TestLifecycleOverMCP(t *testing.T) {
 	env, isErr = w.tool("task_comment", map[string]any{"task": id, "actor": "agent-1", "body": "hi", "token": tok})
 	if isErr || !strings.HasPrefix(fmt.Sprint(env["comment_id"]), "cm-") {
 		t.Fatalf("comment: %v", env)
+	}
+	if env, isErr = w.tool("task_lease_renew", map[string]any{"task": id, "actor": "agent-1", "token": tok, "lease": "45m"}); isErr || env["lease_expires"] == nil {
+		t.Fatalf("lease renew: %v", env)
 	}
 	if env, isErr = w.tool("task_transition", map[string]any{"task": id, "to": "review", "actor": "agent-1", "token": tok}); isErr {
 		t.Fatalf("review: %v", env)

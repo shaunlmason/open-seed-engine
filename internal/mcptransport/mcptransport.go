@@ -70,8 +70,8 @@ func Tools() []Tool {
 				return sv.Create(task.CreateArgs{Title: a.get("title"), Body: a.get("body"), Priority: a.get("priority"), Squad: a.get("squad"), Actor: a.get("actor")})
 			}},
 		{Name: "task_ready", Description: "List claimable cards (no open blockers, unclaimed, caller not locked out)",
-			InputSchema: schema([]string{"actor"}, map[string]any{"actor": str("acting identity")}),
-			handler:     func(sv *task.Service, a args) *task.Result { return sv.Ready(a.get("actor"), "") }},
+			InputSchema: schema([]string{"actor"}, map[string]any{"actor": str("acting identity"), "squad": str("filter by resolved squad")}),
+			handler:     func(sv *task.Service, a args) *task.Result { return sv.Ready(a.get("actor"), a.get("squad")) }},
 		{Name: "task_get", Description: "Fetch one card",
 			InputSchema: schema([]string{"task"}, map[string]any{"task": str("task id")}),
 			handler:     func(sv *task.Service, a args) *task.Result { return sv.Get(a.get("task")) }},
@@ -83,6 +83,13 @@ func Tools() []Tool {
 				"task": str("task id"), "actor": str("acting identity"), "lease": str("lease duration, e.g. 60m")}),
 			handler: func(sv *task.Service, a args) *task.Result {
 				return sv.Claim(a.get("task"), a.get("actor"), a.get("lease"))
+			}},
+		{Name: "task_lease_renew", Description: "Extend a live claim's lease (token-fenced)",
+			InputSchema: schema([]string{"task", "actor", "token"}, map[string]any{
+				"task": str("task id"), "actor": str("acting identity"), "token": str("claim token"),
+				"lease": str("lease duration, e.g. 45m")}),
+			handler: func(sv *task.Service, a args) *task.Result {
+				return sv.LeaseRenew(a.get("task"), a.get("actor"), a.get("token"), a.get("lease"))
 			}},
 		{Name: "task_release", Description: "Give up a claim without closing (token-fenced)",
 			InputSchema: schema([]string{"task", "actor", "token"}, map[string]any{
