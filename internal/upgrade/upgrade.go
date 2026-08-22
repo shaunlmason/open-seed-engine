@@ -180,13 +180,16 @@ func baseURL(opts Options) (string, *Err) {
 }
 
 // noFollow returns the Location of a redirect without following it — Go's
-// default client would follow to a 200 and discard the header.
+// default client would follow to a 200 and discard the header. Used ONLY
+// for the latest-tag resolution; asset fetches use assetClient, which
+// follows redirects (GitHub serves release assets via a 302 to its CDN).
 var client = &http.Client{
 	CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse },
 }
+var assetClient = &http.Client{}
 
 func fetch(u string) (string, int, *Err) {
-	resp, err := client.Get(u)
+	resp, err := assetClient.Get(u)
 	if err != nil {
 		return "", 0, unreachable("GET %s: %v", u, err)
 	}
@@ -198,6 +201,8 @@ func fetch(u string) (string, int, *Err) {
 	return string(body), resp.StatusCode, nil
 }
 
+// resolveLatest reads the tag from the redirect Location with the
+// no-follow client (see above).
 func resolveLatest(base, repo string) (string, *Err) {
 	u := base + "/" + repo + "/releases/latest"
 	resp, err := client.Get(u)

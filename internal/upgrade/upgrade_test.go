@@ -59,7 +59,28 @@ func (f *fakeRelease) handler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		fmt.Fprint(w, body)
+		// Like the real host: assets live behind a CDN redirect. The
+		// adapter must follow it for downloads (and must NOT follow the
+		// latest-tag redirect above).
+		w.Header().Set("Location", "/cdn/"+tag+"/"+file)
+		w.WriteHeader(http.StatusFound)
+	})
+	mux.HandleFunc("/cdn/", func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, "/cdn/")
+		parts := strings.SplitN(rest, "/", 2)
+		if len(parts) != 2 {
+			http.NotFound(w, r)
+			return
+		}
+		tag, file := parts[0], parts[1]
+		switch file {
+		case "checksums.txt":
+			fmt.Fprint(w, f.checksums[tag])
+		case "protocol.txt":
+			fmt.Fprint(w, f.protocols[tag])
+		default:
+			http.NotFound(w, r)
+		}
 	})
 	return mux
 }
