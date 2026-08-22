@@ -204,3 +204,71 @@ func TestMissingRefRefused(t *testing.T) {
 		t.Fatalf("missing ref not refused: %v", err)
 	}
 }
+
+// Compose (skillfold semantics, plan os-6f3104db as amended): a compose
+// entry generates a new skill from an ordered use list — concatenated
+// bodies with heading demotion, supporting files carried over — with
+// existence/self-use/cycle refusals and compose-of-compose in
+// topological order.
+func TestComposeGeneratesSkill(t *testing.T) {
+	src := sourceRepo(t)
+	r := root(t, "schema_version: \"1\"\nskills:\n  - {name: alpha, repo: "+src+", ref: v1, path: skills/alpha}\n  - {name: beta, repo: "+src+", ref: v1, path: skills/beta}\ncompose:\n  - {name: duo, description: Both at once., use: [alpha, beta]}\n  - {name: trio, use: [duo, alpha]}\n")
+	if _, err := LockAll(r); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := Install(r, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(rep.Installed, ",")
+	if !strings.Contains(joined, "duo (composed)") || !strings.Contains(joined, "trio (composed)") {
+		t.Fatalf("composed skills not reported: %+v", rep)
+	}
+	b, err := os.ReadFile(filepath.Join(r, ManagedDir, "duo", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	ia, ib := strings.Index(s, "## alpha v1"), strings.Index(s, "## beta v1")
+	if !strings.HasPrefix(s, "# duo\n") || ia < 0 || ib < 0 || ia > ib {
+		t.Fatalf("compose body wrong (root heading, demotion, order):\n%s", s)
+	}
+	if !strings.Contains(s, "Both at once.") {
+		t.Fatalf("description missing:\n%s", s)
+	}
+	if _, err := os.Stat(filepath.Join(r, ManagedDir, "duo", "helper.sh")); err != nil {
+		t.Fatalf("supporting file not carried over: %v", err)
+	}
+	// compose-of-compose nests one level deeper.
+	b, _ = os.ReadFile(filepath.Join(r, ManagedDir, "trio", "SKILL.md"))
+	if !strings.Contains(string(b), "## duo") || !strings.Contains(string(b), "### alpha v1") {
+		t.Fatalf("compose-of-compose not topological/demoted:\n%s", b)
+	}
+	// A second install regenerates and pruning keeps composed dirs.
+	rep, err = Install(r, true)
+	if err != nil || len(rep.Pruned) != 0 {
+		t.Fatalf("second install pruned composed dirs: %v %+v", err, rep)
+	}
+}
+
+func TestComposeRefusals(t *testing.T) {
+	cases := map[string]string{
+		"unknown use": "schema_version: \"1\"\ncompose:\n  - {name: x, use: [ghost]}\n",
+		"self use":    "schema_version: \"1\"\ncompose:\n  - {name: x, use: [x]}\n",
+		"cycle":       "schema_version: \"1\"\ncompose:\n  - {name: a, use: [b]}\n  - {name: b, use: [a]}\n",
+		"collision":   "schema_version: \"1\"\nskills:\n  - {name: x, repo: r, ref: v1}\ncompose:\n  - {name: x, use: [x]}\n",
+	}
+	for name, manifest := range cases {
+		if _, err := LoadManifest(root(t, manifest)); err == nil {
+			t.Errorf("%s: not refused", name)
+		}
+	}
+}
+
+func TestDemoteLeavesFencesAlone(t *testing.T) {
+	in := "# H1\n```\n# not a heading\n```\n## H2\n"
+	want := "## H1\n```\n# not a heading\n```\n### H2\n"
+	if got := demote(in); got != want {
+		t.Fatalf("demote:\n%q\nwant\n%q", got, want)
+	}
+}

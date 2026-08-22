@@ -38,9 +38,21 @@ type Source struct {
 	Path string `yaml:"path" json:"path"`
 }
 
+// Compose declares a *generated* skill (skillfold semantics,
+// inspirations/05): its SKILL.md concatenates the used skills' bodies in
+// declared order, headings demoted under a root heading, with supporting
+// files carried over. Composed skills are not locked — they are
+// deterministic functions of locked inputs, regenerated at install.
+type Compose struct {
+	Name        string   `yaml:"name" json:"name"`
+	Description string   `yaml:"description" json:"description"`
+	Use         []string `yaml:"use" json:"use"`
+}
+
 type Manifest struct {
-	SchemaVersion string   `yaml:"schema_version"`
-	Skills        []Source `yaml:"skills"`
+	SchemaVersion string    `yaml:"schema_version"`
+	Skills        []Source  `yaml:"skills"`
+	Compose       []Compose `yaml:"compose"`
 }
 
 type LockEntry struct {
@@ -91,7 +103,79 @@ func LoadManifest(root string) (*Manifest, error) {
 		}
 		seen[s.Name] = true
 	}
+	for _, c := range m.Compose {
+		if c.Name == "" || len(c.Use) == 0 {
+			return nil, refuse("%s: every compose entry needs a name and a non-empty use list", ManifestPath)
+		}
+		if strings.ContainsAny(c.Name, "/\\") {
+			return nil, refuse("%s: compose name %q may not contain path separators", ManifestPath, c.Name)
+		}
+		if seen[c.Name] {
+			return nil, refuse("%s: duplicate name %q (compose and skill names share one namespace)", ManifestPath, c.Name)
+		}
+		seen[c.Name] = true
+	}
+	// Every use entry must exist (a skill removed while still used is a
+	// refusal), self-use is refused, and cycles are refused.
+	for _, c := range m.Compose {
+		for _, u := range c.Use {
+			if u == c.Name {
+				return nil, refuse("%s: compose %q uses itself", ManifestPath, c.Name)
+			}
+			if !seen[u] {
+				return nil, refuse("%s: compose %q uses %q, which is not a declared skill or compose entry", ManifestPath, c.Name, u)
+			}
+		}
+	}
+	if _, err := composeOrder(&m); err != nil {
+		return nil, err
+	}
 	return &m, nil
+}
+
+// composeOrder returns compose names in topological (dependency-first)
+// order — compose-of-compose is allowed; a cycle is a refusal naming its
+// path.
+func composeOrder(m *Manifest) ([]string, error) {
+	byName := map[string]*Compose{}
+	for i := range m.Compose {
+		byName[m.Compose[i].Name] = &m.Compose[i]
+	}
+	const (
+		unvisited = 0
+		visiting  = 1
+		done      = 2
+	)
+	state := map[string]int{}
+	var order []string
+	var visit func(name string, path []string) error
+	visit = func(name string, path []string) error {
+		c, isCompose := byName[name]
+		if !isCompose {
+			return nil // fetched skill: a leaf
+		}
+		switch state[name] {
+		case done:
+			return nil
+		case visiting:
+			return refuse("%s: compose cycle detected: %s", ManifestPath, strings.Join(append(path, name), " -> "))
+		}
+		state[name] = visiting
+		for _, u := range c.Use {
+			if err := visit(u, append(path, name)); err != nil {
+				return err
+			}
+		}
+		state[name] = done
+		order = append(order, name)
+		return nil
+	}
+	for _, c := range m.Compose {
+		if err := visit(c.Name, nil); err != nil {
+			return nil, err
+		}
+	}
+	return order, nil
 }
 
 func LoadLock(root string) (*Lock, error) {
@@ -300,6 +384,23 @@ func Install(root string, frozen bool) (*InstallReport, error) {
 		}
 		rep.Installed = append(rep.Installed, e.Name)
 	}
+	// Generate composed skills (dependency-first, so compose-of-compose
+	// reads its inputs' already-generated trees).
+	order, err := composeOrder(m)
+	if err != nil {
+		return nil, err
+	}
+	byName := map[string]Compose{}
+	for _, c := range m.Compose {
+		byName[c.Name] = c
+	}
+	for _, name := range order {
+		if err := generateCompose(managed, byName[name]); err != nil {
+			return nil, err
+		}
+		inLock[name] = true // composed dirs are managed; pruning keeps them
+		rep.Installed = append(rep.Installed, name+" (composed)")
+	}
 	// Managed-directory-only pruning.
 	entries, err := os.ReadDir(managed)
 	if err == nil {
@@ -322,6 +423,86 @@ func Install(root string, frozen bool) (*InstallReport, error) {
 		}
 	}
 	return rep, nil
+}
+
+// stripFrontmatter drops a leading YAML frontmatter block.
+func stripFrontmatter(s string) string {
+	if !strings.HasPrefix(s, "---\n") {
+		return s
+	}
+	rest := s[4:]
+	if i := strings.Index(rest, "\n---\n"); i >= 0 {
+		return rest[i+5:]
+	}
+	return s
+}
+
+// demote nests a part's headings one level under the composed root
+// heading; fenced code blocks are untouched.
+func demote(s string) string {
+	lines := strings.Split(s, "\n")
+	fenced := false
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " ")
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			fenced = !fenced
+			continue
+		}
+		if !fenced && strings.HasPrefix(line, "#") {
+			lines[i] = "#" + line
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// generateCompose materializes one composed skill from its inputs'
+// managed trees: a generated SKILL.md (root heading + demoted bodies in
+// declared order) plus the inputs' supporting files, carried over so
+// relative paths keep working.
+func generateCompose(managed string, c Compose) error {
+	dest := filepath.Join(managed, c.Name)
+	if err := os.RemoveAll(dest); err != nil {
+		return err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\n", c.Name)
+	fmt.Fprintf(&b, "\n> Generated by `seed skills install` from: %s. Do not edit — edit the inputs.\n", strings.Join(c.Use, ", "))
+	if c.Description != "" {
+		fmt.Fprintf(&b, "\n%s\n", c.Description)
+	}
+	for _, u := range c.Use {
+		src := filepath.Join(managed, u)
+		body, err := os.ReadFile(filepath.Join(src, "SKILL.md"))
+		if err != nil {
+			return refuse("compose %s: input %q has no installed SKILL.md (run `seed skills install` with it locked first): %v", c.Name, u, err)
+		}
+		fmt.Fprintf(&b, "\n%s\n", strings.TrimRight(demote(stripFrontmatter(string(body))), "\n"))
+		err = filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return err
+			}
+			rel, _ := filepath.Rel(src, p)
+			if rel == "SKILL.md" {
+				return nil
+			}
+			content, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			full := filepath.Join(dest, rel)
+			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+				return err
+			}
+			return os.WriteFile(full, content, 0o644)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dest, "SKILL.md"), []byte(b.String()), 0o644)
 }
 
 // frozenCheck refuses when seed.yaml and seed.lock disagree — an
