@@ -13,6 +13,7 @@ import (
 	"github.com/shaunlmason/open-seed-engine/internal/gitx"
 	"github.com/shaunlmason/open-seed-engine/internal/spec"
 	"github.com/shaunlmason/open-seed-engine/internal/stateref"
+	"github.com/shaunlmason/open-seed-engine/internal/validate"
 )
 
 // ReapExpired releases every in_progress card whose lease has expired (§7.1
@@ -162,4 +163,23 @@ func hasPlanEntry(c *card.Card) bool {
 		}
 	}
 	return false
+}
+
+// AncestryWarnings adapts the card set to validate's §6 goal-ancestry
+// check (plan os-10c10aae): report-only, computed here because cards
+// live behind the store.
+func (sv *Service) AncestryWarnings(teams []validate.Team) []string {
+	head, err := sv.Store.Sync()
+	if err != nil {
+		return nil
+	}
+	cards, err := sv.allCards(head)
+	if err != nil {
+		return nil
+	}
+	var ac []validate.AncestryCard
+	for _, c := range cards {
+		ac = append(ac, validate.AncestryCard{ID: c.ID, Parent: c.Parent, State: c.State, Labels: c.Labels})
+	}
+	return validate.AncestryWarnings(teams, ac)
 }

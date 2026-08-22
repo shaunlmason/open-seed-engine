@@ -29,12 +29,29 @@ type Guardrails struct {
 }
 
 type Team struct {
-	Name     string   `yaml:"name"`
-	Lead     string   `yaml:"lead"`
-	Scope    []string `yaml:"scope"`
-	Priority int      `yaml:"priority"`
-	Tier     string   `yaml:"tier"`
-	Review   string   `yaml:"review"`
+	Name        string        `yaml:"name"`
+	Mission     string        `yaml:"mission"`
+	Lead        string        `yaml:"lead"`
+	Scope       []string      `yaml:"scope"`
+	SharedScope []SharedScope `yaml:"shared_scope"`
+	Backlog     Backlog       `yaml:"backlog"`
+	Priority    int           `yaml:"priority"`
+	Tier        string        `yaml:"tier"`
+	Review      string        `yaml:"review"`
+}
+
+// SharedScope is §6's explicit overlap exception: a path both squads may
+// touch, with exactly one owning squad whose gate governs merges into it.
+type SharedScope struct {
+	Path  string `yaml:"path"`
+	Owner string `yaml:"owner"`
+}
+
+// Backlog is the squad's card filter (v2 routing): a card matches when it
+// carries any of the listed labels. The empty filter matches nothing
+// special — cards reach such a squad explicitly or via the core fallback.
+type Backlog struct {
+	Labels []string `yaml:"labels"`
 }
 
 func tierRank(t string) int {
@@ -117,17 +134,13 @@ func GuardrailsFile(root string) []error {
 	return errs
 }
 
-// Teams checks tier ≤ ceiling, a named human lead, unique priorities, and
-// non-overlapping scopes across squads (§6).
-func Teams(root string) []error {
-	g, err := loadGuardrails(root)
-	if err != nil {
-		return []error{fmt.Errorf("teams: %w", err)}
-	}
+// LoadTeams parses every squad file under .seed/teams (the .example
+// suffix keeps a file inert).
+func LoadTeams(root string) ([]Team, []error) {
 	dir := filepath.Join(root, ".seed", "teams")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return []error{fmt.Errorf("teams: %w", err)}
+		return nil, []error{fmt.Errorf("teams: %w", err)}
 	}
 	var errs []error
 	var teams []Team
@@ -147,6 +160,45 @@ func Teams(root string) []error {
 		}
 		teams = append(teams, t)
 	}
+	return teams, errs
+}
+
+// isFallbackScope reports a bare-wildcard scope — §6's "matches what
+// nothing else claims" catch-all, exempt from pairwise overlap.
+func isFallbackScope(g string) bool { return globPrefix(g) == "" }
+
+// sharedScopeOwned reports whether some squad declares the overlapping
+// pair under shared_scope with an owner that names a real squad.
+func sharedScopeOwned(teams []Team, a, b string) bool {
+	names := map[string]bool{}
+	for _, t := range teams {
+		names[t.Name] = true
+	}
+	for _, t := range teams {
+		for _, s := range t.SharedScope {
+			if !names[s.Owner] {
+				continue
+			}
+			if prefixOverlap(s.Path, a) && prefixOverlap(s.Path, b) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Teams checks tier ≤ ceiling, a named human lead, unique priorities, and
+// non-overlapping scopes across squads (§6). Core's bare-`**` fallback is
+// exempt from pairwise overlap — it necessarily intersects every scope —
+// but two squads both claiming the bare wildcard is a violation, and an
+// overlap of two specific scopes passes only under an owned shared_scope
+// entry.
+func Teams(root string) []error {
+	g, err := loadGuardrails(root)
+	if err != nil {
+		return []error{fmt.Errorf("teams: %w", err)}
+	}
+	teams, errs := LoadTeams(root)
 	priorities := map[int]string{}
 	for _, t := range teams {
 		if t.Lead == "" {
@@ -164,14 +216,147 @@ func Teams(root string) []error {
 		for j := i + 1; j < len(teams); j++ {
 			for _, a := range teams[i].Scope {
 				for _, b := range teams[j].Scope {
-					if prefixOverlap(a, b) {
-						errs = append(errs, fmt.Errorf("squads %s and %s have overlapping scopes (%q vs %q) — scopes may not overlap (§6)", teams[i].Name, teams[j].Name, a, b))
+					switch {
+					case isFallbackScope(a) && isFallbackScope(b):
+						errs = append(errs, fmt.Errorf("squads %s and %s both claim the bare-wildcard fallback scope — only one catch-all squad may exist (§6)", teams[i].Name, teams[j].Name))
+					case isFallbackScope(a) || isFallbackScope(b):
+						// the catch-all necessarily intersects everything: exempt
+					case prefixOverlap(a, b) && !sharedScopeOwned(teams, a, b):
+						errs = append(errs, fmt.Errorf("squads %s and %s have overlapping scopes (%q vs %q) without an owned shared_scope entry (§6)", teams[i].Name, teams[j].Name, a, b))
 					}
 				}
 			}
 		}
 	}
 	return errs
+}
+
+// FallbackSquad names the squad claiming the bare-wildcard scope (core
+// in the shipped template) — the §6 "no card can be invisible" floor.
+func FallbackSquad(teams []Team) string {
+	for _, t := range teams {
+		for _, s := range t.Scope {
+			if isFallbackScope(s) {
+				return t.Name
+			}
+		}
+	}
+	return ""
+}
+
+// ResolveSquad implements §6's routing order: explicit squad → the
+// matching backlog filter with the lowest priority int → the fallback
+// squad.
+func ResolveSquad(explicit string, labels []string, teams []Team) string {
+	if explicit != "" {
+		return explicit
+	}
+	best, bestPri := "", int(^uint(0)>>1)
+	for _, t := range teams {
+		for _, want := range t.Backlog.Labels {
+			for _, have := range labels {
+				if want == have && t.Priority < bestPri {
+					best, bestPri = t.Name, t.Priority
+				}
+			}
+		}
+	}
+	if best != "" {
+		return best
+	}
+	return FallbackSquad(teams)
+}
+
+// TeamsWarnings reports §6 advisories that must not fail the shipped
+// template: once multi-squad is active (>1 squad), a squad reviewing via
+// CODEOWNERS should have its lead present there.
+func TeamsWarnings(root string) []string {
+	teams, _ := LoadTeams(root)
+	if len(teams) <= 1 {
+		return nil
+	}
+	var co string
+	for _, p := range []string{".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"} {
+		if b, err := os.ReadFile(filepath.Join(root, p)); err == nil {
+			co = string(b)
+			break
+		}
+	}
+	var warns []string
+	for _, t := range teams {
+		if t.Review != "codeowners" || t.Lead == "" {
+			continue
+		}
+		if !strings.Contains(co, "@"+t.Lead) {
+			warns = append(warns, fmt.Sprintf("squad %s reviews via codeowners but lead @%s is not in CODEOWNERS — its scope gate cannot bind (§6)", t.Name, t.Lead))
+		}
+	}
+	return warns
+}
+
+// AncestryActive is the §6 activation literal: goal-ancestry checking
+// wakes when more than one squad exists or any squad declares a mission.
+func AncestryActive(teams []Team) bool {
+	if len(teams) > 1 {
+		return true
+	}
+	for _, t := range teams {
+		if strings.TrimSpace(t.Mission) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// AncestryCard is the minimal card shape the ancestry check needs.
+type AncestryCard struct {
+	ID, Parent, State string
+	Labels            []string
+}
+
+// AncestryWarnings reports open cards with no resolvable parent chain to
+// a mission card (one labeled "mission"). Report, not refusal — §6's
+// alignment mitigation. Inactive repos (single squad, no mission) get
+// nothing.
+func AncestryWarnings(teams []Team, cards []AncestryCard) []string {
+	if !AncestryActive(teams) {
+		return nil
+	}
+	byID := map[string]AncestryCard{}
+	for _, c := range cards {
+		byID[c.ID] = c
+	}
+	isMission := func(c AncestryCard) bool {
+		for _, l := range c.Labels {
+			if l == "mission" {
+				return true
+			}
+		}
+		return false
+	}
+	var warns []string
+	for _, c := range cards {
+		if c.State == "done" || c.State == "cancelled" || isMission(c) {
+			continue
+		}
+		cur, seen, rooted := c, map[string]bool{}, false
+		for cur.Parent != "" && !seen[cur.ID] {
+			seen[cur.ID] = true
+			p, okP := byID[cur.Parent]
+			if !okP {
+				break
+			}
+			if isMission(p) {
+				rooted = true
+				break
+			}
+			cur = p
+		}
+		if !rooted {
+			warns = append(warns, fmt.Sprintf("card %s has no resolvable parent chain to a mission (§6 goal ancestry)", c.ID))
+		}
+	}
+	return warns
 }
 
 // RoleVariants enforces §6: a role's variants (name.<variant>.md) may differ

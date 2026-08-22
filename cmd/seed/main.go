@@ -622,6 +622,17 @@ func runValidate(stdout, stderr *os.File) int {
 		}
 		return 1
 	}
+	// §6 advisories (report, not refusal): CODEOWNERS binding under
+	// multi-squad, and goal ancestry once >1 squad or a mission exists.
+	warns := validate.TeamsWarnings(root)
+	if teams, _ := validate.LoadTeams(root); validate.AncestryActive(teams) {
+		if sv, err := task.NewService(root); err == nil {
+			warns = append(warns, sv.AncestryWarnings(teams)...)
+		}
+	}
+	for _, w := range warns {
+		fmt.Fprintln(stderr, "seed validate: warning:", w)
+	}
 	fmt.Fprintln(stdout, "validate ok: guardrails, teams, role variants, plans")
 	return 0
 }

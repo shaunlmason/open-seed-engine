@@ -118,8 +118,8 @@ func TestDuplicatePriorityAndScopeOverlap(t *testing.T) {
 	if !hasError(errs, "share priority") {
 		t.Errorf("duplicate priority accepted: %v", errs)
 	}
-	if !hasError(errs, "overlapping scopes") {
-		t.Errorf("scope overlap accepted: %v", errs)
+	if !hasError(errs, "bare-wildcard fallback") {
+		t.Errorf("double catch-all accepted: %v", errs)
 	}
 	// Disjoint scopes + unique priorities pass.
 	second = strings.NewReplacer("core", "web", "priority: 1", "priority: 2", `["**"]`, `["web/**"]`).Replace(goodTeam)
@@ -156,5 +156,55 @@ func TestPlanLintInRepo(t *testing.T) {
 		[]byte("# Plan\n\n## Steps\n\n1. x\n"), 0o644)
 	if errs := Plans(root); !hasError(errs, "missing or empty section") {
 		t.Fatalf("bad plan accepted: %v", errs)
+	}
+}
+
+// §6 as amended (plan os-10c10aae): core's bare-`**` fallback coexists
+// with any second squad; two specific scopes overlap only under an owned
+// shared_scope entry; the ancestry literal is >1 squad || any mission.
+func TestFallbackExemptionAndSharedScope(t *testing.T) {
+	root := setup(t)
+	web := strings.NewReplacer("core", "web", "priority: 1", "priority: 2", `["**"]`, `["web/**"]`).Replace(goodTeam)
+	os.WriteFile(filepath.Join(root, ".seed/teams/web.yaml"), []byte(web), 0o644)
+	if errs := Teams(root); len(errs) > 0 {
+		t.Fatalf("core ** + specific squad must validate: %v", errs)
+	}
+	// A second specific squad overlapping web/** fails without shared_scope…
+	api := strings.NewReplacer("core", "api", "priority: 1", "priority: 3", `["**"]`, `["web/shared/**"]`).Replace(goodTeam)
+	os.WriteFile(filepath.Join(root, ".seed/teams/api.yaml"), []byte(api), 0o644)
+	if errs := Teams(root); !hasError(errs, "overlapping scopes") {
+		t.Fatalf("specific overlap accepted: %v", errs)
+	}
+	// …and passes once an owned shared_scope entry covers it.
+	api = strings.Replace(api, "scope:", "shared_scope:\n  - {path: \"web/shared/**\", owner: web}\nscope:", 1)
+	os.WriteFile(filepath.Join(root, ".seed/teams/api.yaml"), []byte(api), 0o644)
+	if errs := Teams(root); len(errs) > 0 {
+		t.Fatalf("owned shared_scope still rejected: %v", errs)
+	}
+}
+
+func TestAncestryActivationLiteral(t *testing.T) {
+	solo := []Team{{Name: "core"}}
+	if AncestryActive(solo) {
+		t.Fatal("core-only, missionless repo must stay inactive")
+	}
+	if !AncestryActive([]Team{{Name: "core", Mission: "ship"}}) {
+		t.Fatal("a mission activates ancestry")
+	}
+	if !AncestryActive([]Team{{Name: "a"}, {Name: "b"}}) {
+		t.Fatal("a second squad activates ancestry")
+	}
+	cards := []AncestryCard{
+		{ID: "m1", Labels: []string{"mission"}},
+		{ID: "c1", Parent: "m1"},
+		{ID: "c2"},
+		{ID: "c3", State: "done"},
+	}
+	warns := AncestryWarnings([]Team{{Name: "core", Mission: "ship"}}, cards)
+	if len(warns) != 1 || !strings.Contains(warns[0], "c2") {
+		t.Fatalf("ancestry warnings = %v", warns)
+	}
+	if w := AncestryWarnings(solo, cards); w != nil {
+		t.Fatalf("inactive repo warned: %v", w)
 	}
 }
