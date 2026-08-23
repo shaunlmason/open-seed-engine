@@ -52,8 +52,8 @@ func fastService(t *testing.T, dir string) *Service {
 	return sv
 }
 
-// The suite's core lifecycle — create, promote, claim, fence, park, review,
-// reject-lockout, cascade — runs against the SQLite store through exactly
+// The suite's core lifecycle: create, promote, claim, fence, park, review,
+// reject-lockout, cascade: runs against the SQLite store through exactly
 // the same Service code paths as filecards.
 func TestFastcardsLifecycle(t *testing.T) {
 	sv := fastService(t, "")
@@ -102,7 +102,7 @@ func TestFastcardsLifecycle(t *testing.T) {
 	if state := rg.Fields["state"].(string); state != "ready" {
 		t.Fatalf("cascade did not release dependent: %s", state)
 	}
-	// Anchors are a state-ref mechanism — refused with a clear name here.
+	// Anchors are a state-ref mechanism: refused with a clear name here.
 	if ra := sv.Anchor(); ra.Code != 5 || ra.Err != "anchors_not_applicable" {
 		t.Fatalf("anchor on fastcards = (%d,%s)", ra.Code, ra.Err)
 	}
@@ -112,7 +112,7 @@ func TestFastcardsLifecycle(t *testing.T) {
 
 // The plan's contention proof: the loser blocks on the winner's LIVE
 // transaction (busy wait, not error), then refuses on the state the winner
-// committed — exactly one claim granted.
+// committed: exactly one claim granted.
 func TestFastcardsClaimContentionUnderHeldTransaction(t *testing.T) {
 	sv := fastService(t, "")
 	mustOK(t, sv.Init())
@@ -163,7 +163,7 @@ func TestFastcardsClaimContentionUnderHeldTransaction(t *testing.T) {
 	}
 }
 
-// Linked worktrees resolve the SAME database through the common git dir —
+// Linked worktrees resolve the SAME database through the common git dir:
 // a claim from the main checkout is contention inside the worktree.
 func TestFastcardsWorktreeSharesOneDB(t *testing.T) {
 	sv := fastService(t, "")

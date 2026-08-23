@@ -156,7 +156,7 @@ func Run(opts RunOptions) (*RunResult, error) {
 	return r.res, nil
 }
 
-// schedule executes the top-level steps (remediation steps excluded — they
+// schedule executes the top-level steps (remediation steps excluded: they
 // are gate-driven) in topological parallel waves.
 func (r *runner) schedule() {
 	remediation := remediationIDs(r.wf)
@@ -516,7 +516,7 @@ func (r *runner) stubProduces(s *Step) error {
 // genStub builds a minimal instance satisfying a (simple) JSON Schema:
 // const/enum/default pin exact values; required properties get zero
 // values by type. Constraints beyond that (pattern, minLength, ...)
-// cannot be guessed — enforceProduces then fails the mock run visibly,
+// cannot be guessed: enforceProduces then fails the mock run visibly,
 // telling the author to pin a const/enum/default.
 func genStub(schema map[string]any) any {
 	if schema == nil {
@@ -688,7 +688,7 @@ func anyFailed(steps map[string]*StepReport) bool {
 	return false
 }
 
-// runsBase resolves <git-common-dir>/seed-runs — local, shared across
+// runsBase resolves <git-common-dir>/seed-runs: local, shared across
 // linked worktrees, invisible to commits and CI (the fastcards placement
 // precedent). SEED_RUNS_DIR overrides for tests.
 func runsBase(root string) (string, error) {

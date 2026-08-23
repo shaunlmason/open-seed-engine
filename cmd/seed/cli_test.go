@@ -11,7 +11,7 @@ import (
 )
 
 // CLI-level tests: every subcommand runs through run() against a scratch
-// fastcards repo, exactly as a user invokes it — argument parsing, service
+// fastcards repo, exactly as a user invokes it: argument parsing, service
 // construction, envelope emission, and exit codes all covered at the seam
 // the template scripts actually call.
 

@@ -1,5 +1,5 @@
 {
-  "$comment": "The D1 edge table with §7.1 verb classes, as data. Every legal transition appears exactly once and carries exactly one class. Worker rows require the current claim token (requires_token) except claim, which mints it. Effects are the shim-written side effects defined in §7.1/D1 — there is no free-form field-set verb.",
+  "$comment": "The D1 edge table with §7.1 verb classes, as data. Every legal transition appears exactly once and carries exactly one class. Worker rows require the current claim token (requires_token) except claim, which mints it. Effects are the shim-written side effects defined in §7.1/D1: there is no free-form field-set verb.",
   "schema_version": "1.0",
   "effect_vocabulary": {
     "mint_token": "issue a fresh claim token and write the card's claim block",
@@ -22,7 +22,7 @@
        {"name": "not_rejected_author", "fail_error": "rejected_author", "fail_exit": 2},
        {"name": "unclaimed", "fail_error": "claim_contention", "fail_exit": 2}
      ],
-     "notes": "Token-minting bootstrap exception (§7.1): presents no token. Synchronous — the claim commit is pushed inside the verb; push rejection re-fetches and re-checks. A claim on an unplanned card authorizes planning only."},
+     "notes": "Token-minting bootstrap exception (§7.1): presents no token. Synchronous: the claim commit is pushed inside the verb; push rejection re-fetches and re-checks. A claim on an unplanned card authorizes planning only."},
     {"from": "ready", "to": "backlog", "verb": "deprioritize", "class": "operator", "effects": []},
     {"from": "ready", "to": "blocked", "verb": "block", "class": "operator", "effects": ["add_blocked_on"],
      "notes": "Manual blocking of unclaimed cards only (§7.1)."},
@@ -35,7 +35,7 @@
      "operator_overrides": [
        {"name": "reap", "guard": "lease_expired",
         "effects": ["end_claim", "write_handoff"],
-        "notes": "Maintenance reap (§7.1): a release, not a rejection — rejected_authors untouched. Legal only when the lease is expired."}
+        "notes": "Maintenance reap (§7.1): a release, not a rejection: rejected_authors untouched. Legal only when the lease is expired."}
      ]},
     {"from": "in_progress", "to": "blocked", "verb": "transition", "class": "worker", "requires_token": true,
      "effects": ["end_claim", "write_handoff", "add_blocked_on"],

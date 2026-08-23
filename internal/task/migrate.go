@@ -1,6 +1,6 @@
 // Backend migration (fastcards plan step 6): `seed state export` dumps the
-// whole store — every card with its full history-bearing fields (they all
-// live in the card files), handoff stubs, and the run log — as one JSON
+// whole store: every card with its full history-bearing fields (they all
+// live in the card files), handoff stubs, and the run log, as one JSON
 // document; `seed state import` loads that document into the currently
 // configured backend, preserving paths (and therefore ids) exactly, and
 // refuses a non-empty target. "Switch backends" is export → flip config →
@@ -21,8 +21,8 @@ import (
 func slicesContains(s []string, v string) bool { return slices.Contains(s, v) }
 
 // StateExport is the migration document. Files are path-keyed verbatim, so
-// nothing the store holds — states, blocked_on edges, rejected authors,
-// evidence, comments, the run log — can be lost in translation.
+// nothing the store holds: states, blocked_on edges, rejected authors,
+// evidence, comments, the run log: can be lost in translation.
 type StateExport struct {
 	SchemaVersion string            `json:"schema_version"`
 	Backend       string            `json:"backend"`
@@ -59,7 +59,7 @@ func (sv *Service) Export() *Result {
 }
 
 // Import loads an export document into the active store. The target must be
-// empty (no cards, empty run log) — import is for populating a fresh store,
+// empty (no cards, empty run log): import is for populating a fresh store,
 // never for silently merging two histories.
 func (sv *Service) Import(raw []byte, actor string) *Result {
 	if !sv.Cfg.IsOperator(actor) {
@@ -93,7 +93,7 @@ func (sv *Service) Import(raw []byte, actor string) *Result {
 			paths = append(paths, p)
 		}
 		sort.Strings(paths)
-		// The import event is appended onto the IMPORTED run log directly —
+		// The import event is appended onto the IMPORTED run log directly:
 		// Mutation.Events would append onto the target's pre-import (empty)
 		// log and clobber the migrated history.
 		files := make(map[string]string, len(doc.Files))

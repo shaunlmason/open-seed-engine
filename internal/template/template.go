@@ -3,7 +3,7 @@
 // recorded provenance in .seed/template.lock names where this repo came
 // from; the command fetches the upstream base and target with system git,
 // three-way merges what changed upstream against what changed locally, and
-// stages the result as ONE commit on a new local branch — conflicts as
+// stages the result as ONE commit on a new local branch: conflicts as
 // standard markers, working tree untouched, no push, no PR. The trust
 // direction is fixed by design (§7.1 amendment): consumer-initiated,
 // review-gated, never a push from upstream into downstream repos.
@@ -57,7 +57,7 @@ func unreachable(msg string, a ...any) *upgrade.Err {
 var shaRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // lock is the parsed .seed/template.lock: `repo <owner/name>` and
-// `version <tag>` are required exactly once; `commit <sha>` is optional —
+// `version <tag>` are required exactly once; `commit <sha>` is optional:
 // stamped by this command with the upstream commit it merged from, never
 // authored at release time (a release cannot record its own SHA).
 type lock struct {
@@ -122,7 +122,7 @@ func renderLock(l *lock, target, sha string) string {
 const lockPath = ".seed/template.lock"
 
 // excluded reports paths the merge never touches: the lock itself (the
-// command advances it) and the consumer's own work products — upstream
+// command advances it) and the consumer's own work products: upstream
 // template history has no business in them. Cards live on the state ref,
 // which the merge never reaches.
 func excluded(path string) bool {
@@ -206,7 +206,7 @@ func mergeFile(r *gitx.Repo, ours, base, theirs string) (string, bool, error) {
 		if !ok {
 			return "", false, err
 		}
-		// merge-file exits with the number of conflicts (positive) —
+		// merge-file exits with the number of conflicts (positive):
 		// stdout still carries the merged content with markers.
 		if ee, isExit := re.Err.(interface{ ExitCode() int }); isExit && ee.ExitCode() > 0 {
 			return re.Output, true, nil
@@ -382,7 +382,7 @@ func Run(opts Options) (*Result, *upgrade.Err) {
 		}
 	}
 
-	// .seed/version bump: the protocol seam moved — the engine pin must
+	// .seed/version bump: the protocol seam moved, the engine pin must
 	// move next, via `scripts/seed upgrade` (its own reviewed step).
 	baseVer, _, _ := r.CatFile(baseSHA, ".seed/version")
 	theirVer, _, _ := r.CatFile(targetSHA, ".seed/version")

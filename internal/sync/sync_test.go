@@ -13,7 +13,7 @@ Intro.
 
 ## Rules
 
-<!-- seed:rules:begin — managed block, synced from rules/ by seed sync; do not edit inline -->
+<!-- seed:rules:begin: managed block, synced from rules/ by seed sync; do not edit inline -->
 - stale rule to be replaced
 <!-- seed:rules:end -->
 

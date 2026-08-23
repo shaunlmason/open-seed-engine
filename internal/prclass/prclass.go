@@ -1,6 +1,6 @@
 // Package prclass classifies PRs by head branch (open-seed D3 purity rule):
 // plan PRs (seed/<id>-plan) touch exactly one plan file; task PRs (seed/<id>)
-// may not touch plans/** at all — not even another task's plan, which would
+// may not touch plans/** at all, not even another task's plan, which would
 // launder plan tampering through an unrelated review.
 package prclass
 
@@ -35,7 +35,7 @@ func Classify(headBranch string) (Kind, string) {
 }
 
 // CheckPurity validates the changed-file set against the PR class. Other PRs
-// pass vacuously here — but callers adapting to merge queues must classify by
+// pass vacuously here, but callers adapting to merge queues must classify by
 // the underlying PR's head branch, never by the merge-group ref (D3).
 func CheckPurity(kind Kind, taskID string, files []string) error {
 	switch kind {

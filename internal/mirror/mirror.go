@@ -1,5 +1,5 @@
 // Package mirror computes the one-way GitHub Issues export (open-seed D1:
-// the mirror is a component, not a backend — cards are authoritative and the
+// the mirror is a component, not a backend: cards are authoritative and the
 // export direction always wins). Plan is a pure function over cards plus the
 // state-ref mapping file; idempotence comes from the mapping's recorded
 // last-exported state, so no issue state is ever read back.

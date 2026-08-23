@@ -1,6 +1,6 @@
 // State-ref conformance lint (§7.2/D7): card structural lint, done-
 // consistency, and commit-over-commit replay of the state ref against the
-// transition table. A failure with --halt-on-fail writes the HALT marker —
+// transition table. A failure with --halt-on-fail writes the HALT marker:
 // the shim then refuses mutating verbs until a human runs `seed state
 // resume`. This catches semantic (fast-forward) tampering that survives the
 // push protections; its trust is push-access-deep like everything on the ref
@@ -22,7 +22,7 @@ import (
 
 const replayLimit = 1000
 
-// StateLint runs all state-ref lints. With no state ref yet it reports ok —
+// StateLint runs all state-ref lints. With no state ref yet it reports ok:
 // check+validate runs on repos that have not run `seed init`.
 func (sv *Service) StateLint(haltOnFail bool, actor string) *Result {
 	head, err := sv.Store.Sync()
@@ -40,7 +40,7 @@ func (sv *Service) StateLint(haltOnFail bool, actor string) *Result {
 		failures = append(failures, sv.replay(head)...)
 	}
 	// Non-git stores have no commit history: the replay lint does not apply
-	// (declared variance — machine-local trust), the card lints still do.
+	// (declared variance: machine-local trust), the card lints still do.
 
 	if len(failures) == 0 {
 		return ok(map[string]any{"verb": "state-lint", "head": head})
@@ -106,7 +106,7 @@ func (sv *Service) lintCards(head string) []string {
 }
 
 // lintDone is the done-consistency lint (D7): every done card corresponds to
-// reviewed, evidenced work — or carries the no-PR exemption, whose evidence
+// reviewed, evidenced work, or carries the no-PR exemption, whose evidence
 // is the server-attributed artifact. Reviewer identity must resolve to the
 // operator roster; the workflow-side lint additionally checks the server's
 // own attribution (this local check is roster-shaped, stated per R10).
@@ -132,7 +132,7 @@ func (sv *Service) lintDone(c *card.Card) []string {
 
 // replay walks the state ref's history (bounded) and checks every card state
 // change against the transition table, and that mutating commits append to
-// the run log — hand-editing the ref cannot produce a legal-looking history.
+// the run log: hand-editing the ref cannot produce a legal-looking history.
 func (sv *Service) replay(head string) []string {
 	gitStore, isGit := sv.Store.(*stateref.Store)
 	if !isGit {

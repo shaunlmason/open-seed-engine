@@ -1,5 +1,5 @@
 // Maintenance verbs (open-seed D7/§7.2): deterministic steps the
-// seed-maintenance workflow runs under its operator credential — no model
+// seed-maintenance workflow runs under its operator credential, no model
 // secrets involved. Each mutation stays one-commit-per-verb.
 package task
 
@@ -47,7 +47,7 @@ func (sv *Service) ReapExpired(actor string) *Result {
 	return ok(map[string]any{"verb": "reap", "reaped": reaped, "skipped": skipped})
 }
 
-// PlanUnblock removes a plan:<pr> entry from a blocked card — the
+// PlanUnblock removes a plan:<pr> entry from a blocked card: the
 // state-shaped plan-unblock auto-path (D1), shim-mediated under the
 // maintenance operator credential. The caller (the workflow) has already
 // established that the PR is merged or closed; each path removes only its
@@ -91,13 +91,13 @@ func (sv *Service) PlanUnblock(id string, pr int, actor string) *Result {
 }
 
 // Anchor tags the current state-ref head as seed-anchor/<ts> and pushes the
-// tag (§7.2 checkpoint anchors — protected tags, never default-branch
+// tag (§7.2 checkpoint anchors: protected tags, never default-branch
 // commits). Runs under the maintenance credential; the tag-protection rule
 // makes it create-only.
 func (sv *Service) Anchor() *Result {
 	gitStore, isGit := sv.Store.(*stateref.Store)
 	if !isGit {
-		// Machine-local stores have no remote to anchor against — the
+		// Machine-local stores have no remote to anchor against: the
 		// integrity story is local-filesystem trust (declared variance).
 		return failure(spec.ExitUnavailable, "anchors_not_applicable", map[string]any{
 			"detail": "anchors checkpoint the seed-state ref; the " + sv.Cfg.Coordination.Backend + " backend is machine-local (no remote, no tags)",
@@ -119,7 +119,7 @@ func (sv *Service) Anchor() *Result {
 
 // Report summarizes coordination health: per-state counts, expired leases
 // (reap candidates), stalled reviews, and long-parked plans (R4/§7.1
-// reporting concerns — never lease events).
+// reporting concerns, never lease events).
 func (sv *Service) Report(stalledAfter time.Duration) *Result {
 	head, err := sv.Store.Sync()
 	if err != nil {

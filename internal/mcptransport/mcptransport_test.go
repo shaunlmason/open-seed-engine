@@ -14,7 +14,7 @@ import (
 	"github.com/shaunlmason/open-seed-engine/internal/task"
 )
 
-// Full card lifecycle driven purely through tools/call over the wire —
+// Full card lifecycle driven purely through tools/call over the wire:
 // identical envelopes, fencing, and refusals to the CLI path.
 
 func fixtureRoot(t *testing.T) string {

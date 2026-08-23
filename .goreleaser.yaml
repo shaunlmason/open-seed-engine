@@ -41,7 +41,7 @@ release:
   draft: false
   prerelease: auto
   extra_files:
-    # The supported .seed/version values — `seed upgrade` preflights this
+    # The supported .seed/version values: `seed upgrade` preflights this
     # before moving a template's pin (plan os-4a347bd1).
     - glob: ./PROTOCOL
       name_template: protocol.txt

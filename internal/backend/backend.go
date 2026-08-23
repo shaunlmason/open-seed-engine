@@ -33,7 +33,7 @@ type Capabilities struct {
 	Budget      string   `toml:"budget"`
 	// StatePortability declares where the coordination state travels:
 	// "repo" (rides a git ref), "replica" (syncs between machines),
-	// "server" (a control plane holds it), "machine" (local only —
+	// "server" (a control plane holds it), "machine" (local only:
 	// fastcards). Machine-readable so negotiation can inspect the
 	// variance instead of reading README prose.
 	StatePortability string `toml:"state_portability"`

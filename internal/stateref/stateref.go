@@ -43,7 +43,7 @@ type Terminal struct {
 
 func (t *Terminal) Error() string { return t.Name }
 
-// Backing is the storage contract the task layer runs on — implemented by
+// Backing is the storage contract the task layer runs on: implemented by
 // this git state-ref store and by builtin alternatives (fastcards' SQLite
 // store). One atomic unit per verb: Mutate's build func reads fresh state at
 // the given head and either returns the changes to commit or refuses with a
@@ -54,7 +54,7 @@ type Backing interface {
 	Halted(head string) (bool, string)
 	ReadFile(head, path string) (string, bool, error)
 	ListDir(head, dir string) ([]string, error)
-	// ListAll returns every stored path (recursive) — the export surface.
+	// ListAll returns every stored path (recursive): the export surface.
 	ListAll(head string) ([]string, error)
 	Mutate(checkHalt bool, build func(head string) (*Mutation, error)) (string, error)
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/shaunlmason/open-seed-engine/internal/template"
 )
 
-// runTemplate: `seed template upgrade` — pull-based template updates (plan
+// runTemplate: `seed template upgrade`, pull-based template updates (plan
 // os-23494e11). Deliberately bypasses withService: it is not a port verb,
 // touches no coordination state, and must work while the backend is halted.
 func runTemplate(args []string, stdout, stderr *os.File) int {

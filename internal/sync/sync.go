@@ -2,7 +2,7 @@
 // (open-seed R1): .seed/agents/ → .claude/agents/, skills/ → .claude/skills/
 // and .agents/skills/, and rules/ fragments → the AGENTS.md managed block.
 // Fan-out copies are byte-identical to their sources (role frontmatter must
-// stay first, so no injected headers — the README markers in each fan-out
+// stay first, so no injected headers: the README markers in each fan-out
 // dir carry the "do not edit here" warning). `--check` recomputes offline
 // and fails on drift; it runs in CI so the fan-out can never diverge
 // silently.
@@ -81,7 +81,7 @@ func copyTree(root, srcDir string, dstDirs []string, suffix, skip string) ([]Act
 
 // copySkills fans out each skills/<name>/ directory (all files) to both
 // harness locations. Managed skills (skills/managed/<name>, installed by
-// `seed skills install` — plan os-6f3104db) fan out exactly like local
+// `seed skills install`: plan os-6f3104db) fan out exactly like local
 // ones: the managed/ segment is stripped so harnesses discover them at
 // the same depth. Managed entries are emitted first, so a local skill
 // with the same name wins.

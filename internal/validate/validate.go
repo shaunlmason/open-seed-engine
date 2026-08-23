@@ -2,7 +2,7 @@
 // shipped convention and its validator are one deliverable): guardrails
 // (auto-merge intersection rule), team files (tier ceiling, unique
 // priorities, non-overlapping scopes, human lead), role variants (body-hash
-// identity — variance in binding, never in craft, §6), and plan files.
+// identity: variance in binding, never in craft, §6), and plan files.
 package validate
 
 import (
@@ -49,7 +49,7 @@ type SharedScope struct {
 
 // Backlog is the squad's card filter (v2 routing): a card matches when it
 // carries any of the listed labels. The empty filter matches nothing
-// special — cards reach such a squad explicitly or via the core fallback.
+// special: cards reach such a squad explicitly or via the core fallback.
 type Backlog struct {
 	Labels []string `yaml:"labels"`
 }
@@ -110,7 +110,7 @@ func loadGuardrails(root string) (*Guardrails, error) {
 }
 
 // GuardrailsFile checks the D3/D4 intersection rule: the auto-merge
-// allowlist may intersect neither the control surface nor plans/** —
+// allowlist may intersect neither the control surface nor plans/**:
 // otherwise an agent could approve its own work order.
 func GuardrailsFile(root string) []error {
 	g, err := loadGuardrails(root)
@@ -163,7 +163,7 @@ func LoadTeams(root string) ([]Team, []error) {
 	return teams, errs
 }
 
-// isFallbackScope reports a bare-wildcard scope — §6's "matches what
+// isFallbackScope reports a bare-wildcard scope: §6's "matches what
 // nothing else claims" catch-all, exempt from pairwise overlap.
 func isFallbackScope(g string) bool { return globPrefix(g) == "" }
 
@@ -189,7 +189,7 @@ func sharedScopeOwned(teams []Team, a, b string) bool {
 
 // Teams checks tier ≤ ceiling, a named human lead, unique priorities, and
 // non-overlapping scopes across squads (§6). Core's bare-`**` fallback is
-// exempt from pairwise overlap — it necessarily intersects every scope —
+// exempt from pairwise overlap, it necessarily intersects every scope,
 // but two squads both claiming the bare wildcard is a violation, and an
 // overlap of two specific scopes passes only under an owned shared_scope
 // entry.
@@ -232,7 +232,7 @@ func Teams(root string) []error {
 }
 
 // FallbackSquad names the squad claiming the bare-wildcard scope (core
-// in the shipped template) — the §6 "no card can be invisible" floor.
+// in the shipped template): the §6 "no card can be invisible" floor.
 func FallbackSquad(teams []Team) string {
 	for _, t := range teams {
 		for _, s := range t.Scope {
@@ -315,7 +315,7 @@ type AncestryCard struct {
 }
 
 // AncestryWarnings reports open cards with no resolvable parent chain to
-// a mission card (one labeled "mission"). Report, not refusal — §6's
+// a mission card (one labeled "mission"). Report, not refusal: §6's
 // alignment mitigation. Inactive repos (single squad, no mission) get
 // nothing.
 func AncestryWarnings(teams []Team, cards []AncestryCard) []string {
@@ -360,7 +360,7 @@ func AncestryWarnings(teams []Team, cards []AncestryCard) []string {
 }
 
 // RoleVariants enforces §6: a role's variants (name.<variant>.md) may differ
-// only in frontmatter — the body (the craft) must be hash-identical to the
+// only in frontmatter: the body (the craft) must be hash-identical to the
 // canonical name.md.
 func RoleVariants(root string) []error {
 	dir := filepath.Join(root, ".seed", "agents")

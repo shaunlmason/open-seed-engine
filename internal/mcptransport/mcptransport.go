@@ -1,13 +1,13 @@
 // Package mcptransport implements `seed mcp serve` (plan os-67a1bf14,
 // research/10 §5.4): MCP as an ADDITIONAL transport, never a
-// replacement — an MCP stdio server exposing one tool per port verb,
+// replacement: an MCP stdio server exposing one tool per port verb,
 // dispatching through the identical task-service path the CLI uses.
 // Same fencing, same transition table, same run-log events, same
 // envelopes; the wrapper holds no coordination logic and adds no
 // authority (--actor stays an asserted tool argument, operator verbs
 // still check the roster, a HALT marker refuses mutating tools exactly
 // as it refuses CLI verbs). The surface is four JSON-RPC 2.0 methods:
-// initialize, notifications/initialized, tools/list, tools/call — no
+// initialize, notifications/initialized, tools/list, tools/call, no
 // SDK dependency.
 package mcptransport
 
@@ -58,7 +58,7 @@ func schema(required []string, props map[string]any) map[string]any {
 	return map[string]any{"type": "object", "properties": props, "required": required, "additionalProperties": false}
 }
 
-// Tools is the port verb surface, one tool per verb — the arg shapes
+// Tools is the port verb surface, one tool per verb: the arg shapes
 // mirror verbs.json.
 func Tools() []Tool {
 	return []Tool{

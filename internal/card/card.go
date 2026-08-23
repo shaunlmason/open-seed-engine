@@ -1,6 +1,6 @@
 // Package card parses and serializes task cards: markdown files with YAML
 // frontmatter, living at tasks/<id>.md on the seed-state ref. The body is the
-// work order — untrusted input (R3); bookkeeping blocks are written only by
+// work order: untrusted input (R3); bookkeeping blocks are written only by
 // the shim as verb side effects (card.schema.json).
 package card
 
@@ -54,7 +54,7 @@ type Card struct {
 	Body string `yaml:"-" json:"body,omitempty"`
 }
 
-// NewID mints a hash-based id (never sequential — D1).
+// NewID mints a hash-based id (never sequential: D1).
 func NewID() string {
 	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {

@@ -1,4 +1,4 @@
-// Package config loads .seed/config.toml — the checked-in, human-owned
+// Package config loads .seed/config.toml: the checked-in, human-owned
 // coordination config (control surface, D4.1).
 package config
 
@@ -51,7 +51,7 @@ func (c *Config) DefaultLease() time.Duration {
 }
 
 // IsOperator reports roster membership (§10 Q5). Local identity is asserted,
-// not authenticated — the real enforcement is push access + server-attributed
+// not authenticated: the real enforcement is push access + server-attributed
 // gates (R10).
 func (c *Config) IsOperator(actor string) bool {
 	return slices.Contains(c.Operators.Actors, actor)

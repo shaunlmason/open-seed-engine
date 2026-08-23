@@ -51,7 +51,7 @@ func setup(t *testing.T) (origin string, a, b *Store) {
 
 // The push-wins race (§7.1): A's build runs against a head that B advances
 // before A pushes. A's push is rejected, the loop re-fetches, and the second
-// build sees B's write — the loser decides from fresh state.
+// build sees B's write: the loser decides from fresh state.
 func TestMutateRetriesOnPushRace(t *testing.T) {
 	_, a, b := setup(t)
 	if _, err := a.Init(); err != nil {
@@ -90,7 +90,7 @@ func TestMutateRetriesOnPushRace(t *testing.T) {
 	}
 }
 
-// A Terminal from build stops the loop immediately — contention decisions
+// A Terminal from build stops the loop immediately: contention decisions
 // made on fresh state are not retried.
 func TestMutateTerminalStopsLoop(t *testing.T) {
 	_, a, _ := setup(t)

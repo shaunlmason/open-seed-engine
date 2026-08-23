@@ -59,7 +59,7 @@ type Outcome struct {
 
 func fail(code int, err string) Outcome { return Outcome{Code: code, Err: err} }
 
-// Evaluate decides one request. It never mutates anything — the shim applies
+// Evaluate decides one request. It never mutates anything: the shim applies
 // Effects transactionally (one state-ref commit per verb, §7.2).
 func Evaluate(s *spec.Spec, req Request, card Card, cred Credential) Outcome {
 	verb, to := req.Verb, req.To
@@ -163,7 +163,7 @@ func checkPrecondition(pc spec.Precondition, card Card, cred Credential) string 
 }
 
 // removalPrefixes maps removal effects to the blocked_on entries they clear.
-// remove_blocked_on_manual clears this operator's own manual: entry — every
+// remove_blocked_on_manual clears this operator's own manual: entry, every
 // unblock path removes only its own entry (D1).
 func removalPrefixes(effects []string, cred Credential) []string {
 	var out []string

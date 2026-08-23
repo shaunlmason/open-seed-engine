@@ -1,7 +1,7 @@
 // Package plan parses and lints plan files (open-seed D3): thin, mandatory,
 // gated, pinned. A plan is markdown with four required sections; its
 // ## Validation Commands are executed mechanically by the loop runner, the
-// pre-merge gate, and CI verify — always from the merge-base blob, never the
+// pre-merge gate, and CI verify, always from the merge-base blob, never the
 // PR head's copy.
 package plan
 

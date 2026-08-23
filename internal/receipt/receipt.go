@@ -1,6 +1,6 @@
 // Package receipt implements the evidence chain (open-seed D4.5): a receipt
 // records the merge-base plan pin and the diff it authorized. Above L1 the CI
-// verify check regenerates the receipt and is the author of record — the
+// verify check regenerates the receipt and is the author of record: the
 // committed copy is a claim, the regenerated one is the truth, and a mismatch
 // fails verification (R11). Verify also enforces the stale-plan rule (D3): a
 // superseded plan must be revocable, so the merge-base plan blob must equal
@@ -54,7 +54,7 @@ type Options struct {
 }
 
 // Generate builds the receipt for taskID on the current HEAD against baseRef.
-// The plan is read from the merge-base blob — never the working tree (D3).
+// The plan is read from the merge-base blob, never the working tree (D3).
 func Generate(repo *gitx.Repo, taskID, baseRef string, opts Options) (*Receipt, error) {
 	mb, err := repo.Git("merge-base", baseRef, "HEAD")
 	if err != nil {

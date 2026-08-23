@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://open-seed.dev/port-schema/card.schema.json",
   "title": "Task card",
-  "description": "The filecards representation of a task on the seed-state ref (tasks/<id>.md frontmatter; the body is the work order — untrusted input AND a work order, D1). Bookkeeping blocks are written only by the shim as defined side effects of verbs. Trust: exactly as trustworthy as state-ref push access (R10); load-bearing gates ground on the default branch instead.",
+  "description": "The filecards representation of a task on the seed-state ref (tasks/<id>.md frontmatter; the body is the work order: untrusted input AND a work order, D1). Bookkeeping blocks are written only by the shim as defined side effects of verbs. Trust: exactly as trustworthy as state-ref push access (R10); load-bearing gates ground on the default branch instead.",
   "type": "object",
   "required": ["id", "state", "title", "created_at"],
   "properties": {
@@ -29,7 +29,7 @@
     },
     "author": {
       "type": "string",
-      "description": "Implementer of record — written by the shim when a claim ends at review submission (in_progress→review); the target of append_rejected_author on reject."
+      "description": "Implementer of record: written by the shim when a claim ends at review submission (in_progress→review); the target of append_rejected_author on reject."
     },
     "rejected_authors": {
       "type": "array", "items": {"type": "string"},
@@ -58,7 +58,7 @@
       },
       "additionalProperties": false
     },
-    "plan_hash": {"type": "string", "description": "Advisory cache only — the authority is the merge-base blob (D3)"},
+    "plan_hash": {"type": "string", "description": "Advisory cache only: the authority is the merge-base blob (D3)"},
     "created_at": {"type": "string", "format": "date-time"},
     "updated_at": {"type": "string", "format": "date-time"}
   }
