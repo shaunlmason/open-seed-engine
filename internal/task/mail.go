@@ -17,13 +17,13 @@ import (
 
 // Mail (plan os-499c5978, inspirations/08 as amended by its erratum):
 // one file per MESSAGE at mail/<recipient>/<msg-id>.yaml on the
-// seed-state ref — never rewritten (rewritten structured files under
+// seed-state ref, never rewritten (rewritten structured files under
 // merge=union interleave into invalid YAML); ack is a file MOVE to
 // mail/<recipient>/acked/<msg-id>.yaml. Broadcast recipient is "_all";
 // acking a broadcast copies it into the actor's acked dir (the shared
 // file stays for other readers, bounded by maintenance pruning). No
 // daemon: mailboxes are read at natural checkpoints; the optional tmux
-// nudge carries no content — "you have mail" only.
+// nudge carries no content: "you have mail" only.
 
 type Message struct {
 	ID     string `yaml:"id" json:"id"`
@@ -128,7 +128,7 @@ func (sv *Service) MailRead(actor string, unreadOnly bool) *Result {
 		return errResult(err)
 	}
 	// Broadcasts this actor already acked appear once, as acked; the
-	// inbox pass may have re-added the shared copy — dedupe by id.
+	// inbox pass may have re-added the shared copy: dedupe by id.
 	seen := map[string]bool{}
 	out := make([]Message, 0, len(msgs))
 	for _, m := range msgs {
@@ -183,7 +183,7 @@ func (sv *Service) MailAck(actor, id string) *Result {
 }
 
 // MailNudge is advisory: with tmux present it pokes the actor's pane
-// with a content-free "you have mail" line (shogun's convention —
+// with a content-free "you have mail" line (shogun's convention:
 // message content never travels through tmux); otherwise a declared
 // no-op.
 func (sv *Service) MailNudge(actor string) *Result {

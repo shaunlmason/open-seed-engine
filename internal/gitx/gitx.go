@@ -1,6 +1,6 @@
 // Package gitx drives the system git binary. The engine deliberately shells
 // out (design §7.5) so all remote operations reuse the user's existing auth;
-// state-ref content is read and written entirely through plumbing — the
+// state-ref content is read and written entirely through plumbing: the
 // seed-state branch is never checked out (§7.2).
 package gitx
 
@@ -45,7 +45,7 @@ func (r *Repo) git(stdin string, args ...string) (string, error) {
 
 func (r *Repo) Git(args ...string) (string, error) { return r.git("", args...) }
 
-// gitRaw runs git capturing stdout byte-exact (no newline trimming) —
+// gitRaw runs git capturing stdout byte-exact (no newline trimming):
 // required for cat-file, where trailing newlines are content.
 func (r *Repo) gitRaw(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
@@ -189,7 +189,7 @@ func (r *Repo) CommitTree(parentTreeish string, parents []string, message string
 }
 
 // ErrNonFastForward marks a push or fetch rejected because the remote and
-// local histories diverge — the claim-contention and integrity signal.
+// local histories diverge: the claim-contention and integrity signal.
 type ErrNonFastForward struct{ Output string }
 
 func (e *ErrNonFastForward) Error() string { return "non-fast-forward: " + strings.TrimSpace(e.Output) }
@@ -223,7 +223,7 @@ func (e *ErrNoRemoteRef) Error() string { return "remote ref not found: " + e.Re
 
 // FetchNoForce fetches remote branch into localRef WITHOUT force: a remote
 // history rewrite is rejected by git itself and surfaces as
-// ErrNonFastForward — the integrity incident of §7.2 (never silently adopt).
+// ErrNonFastForward: the integrity incident of §7.2 (never silently adopt).
 func (r *Repo) FetchNoForce(remote, branch, localRef string) error {
 	_, err := r.Git("fetch", remote, "refs/heads/"+branch+":"+localRef)
 	if err != nil {

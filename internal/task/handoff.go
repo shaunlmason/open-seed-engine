@@ -15,7 +15,7 @@ import (
 // the worker-invoked generator (`seed handoff generate`), whose checkout
 // IS the workspace, and the write_handoff transition effect
 // (release/park/reap). Workspace anchors are only meaningful when the
-// generating process runs in the worker's checkout — a reap runs in the
+// generating process runs in the worker's checkout: a reap runs in the
 // maintenance checkout, so its packet marks the anchors unavailable
 // instead of recording the reaper's unrelated git state.
 const handoffBound = 8 << 10
@@ -91,7 +91,7 @@ func (sv *Service) renderPacket(c *card.Card, reason string, prior *card.Claim, 
 
 // HandoffGenerate renders the continuation packet for a card. With
 // write=true the packet lands at handoff/<task-id>.md on the state ref
-// (the same location the v1 reap stub used — this generator supersedes
+// (the same location the v1 reap stub used: this generator supersedes
 // it). The caller's checkout is the workspace, so anchors are observable.
 func (sv *Service) HandoffGenerate(id, actor string, write bool) *Result {
 	head, err := sv.Store.Sync()

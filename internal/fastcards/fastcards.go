@@ -3,7 +3,7 @@
 // the seed-state ref. Same path-keyed layout (tasks/<id>.md, run-log.jsonl,
 // handoff/…) so card parsing, effects, and lint code are reused unchanged;
 // "head" is a monotonic transaction id. Every verb runs in one BEGIN
-// IMMEDIATE transaction — claims are genuinely atomic, no push-wins
+// IMMEDIATE transaction: claims are genuinely atomic, no push-wins
 // emulation. The declared variance: state is machine-local (it does not
 // travel with clones, forks, or CI), and the state-ref integrity story
 // (anchors, push-access trust) is replaced by local-filesystem trust.
@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	// DBName lives under the repository's COMMON git dir — never a literal
+	// DBName lives under the repository's COMMON git dir, never a literal
 	// .git/ path: linked worktrees (the loop creates one per task) have a
 	// .git *file*, and resolving per-worktree would fragment coordination.
 	DBName   = "seed-fastcards.db"
@@ -108,7 +108,7 @@ func (s *Store) Init() (string, error) {
 	return s.headOn(s.db)
 }
 
-// querier is *sql.DB or *sql.Tx — reads route through the open transaction
+// querier is *sql.DB or *sql.Tx: reads route through the open transaction
 // during a Mutate so build() sees the locked state.
 type querier interface {
 	QueryRow(query string, args ...any) *sql.Row
@@ -132,7 +132,7 @@ func (s *Store) headOn(q querier) (string, error) {
 }
 
 // Sync returns the current head (the monotonic transaction id). There is no
-// remote and nothing to fetch — offline is native here.
+// remote and nothing to fetch: offline is native here.
 func (s *Store) Sync() (string, error) {
 	if err := s.ensureSchema(); err != nil {
 		return "", err
@@ -152,7 +152,7 @@ func (s *Store) Halted(head string) (bool, string) {
 
 // ReadFile reads the current content of path. The head argument is accepted
 // for interface parity; SQLite state has exactly one version, and during a
-// Mutate reads see the transaction's locked snapshot — strictly fresher than
+// Mutate reads see the transaction's locked snapshot: strictly fresher than
 // any head the caller could name.
 func (s *Store) ReadFile(head, path string) (string, bool, error) {
 	var content string
@@ -226,11 +226,11 @@ func isBusy(err error) bool {
 }
 
 // Mutate runs one verb in one BEGIN IMMEDIATE transaction: take the write
-// lock first, then read fresh state, decide, and apply — the contention
+// lock first, then read fresh state, decide, and apply: the contention
 // loser blocks on the lock (busy_timeout), re-reads the winner's claim, and
 // refuses on its own terms (exit 2 via *stateref.Terminal). SQLITE_BUSY from
 // a lock that outlives the timeout is retried with jittered backoff, bounded
-// by MaxAttempts — never surfaced raw.
+// by MaxAttempts, never surfaced raw.
 func (s *Store) Mutate(checkHalt bool, build func(head string) (*stateref.Mutation, error)) (string, error) {
 	var lastErr error
 	for attempt := 0; attempt < s.MaxAttempts; attempt++ {

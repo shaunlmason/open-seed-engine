@@ -9,7 +9,7 @@ import (
 
 // Spec-driven output conformance (plan os-61967950): the required verbs'
 // declared outputs in verbs.json are asserted against the envelope each
-// builtin backend actually produces — the table derives from the spec, so
+// builtin backend actually produces: the table derives from the spec, so
 // a newly declared output fails here until both builtins emit it. The
 // hard-coded id tests remain as supplemental coverage.
 
@@ -44,7 +44,7 @@ func loadDeclaredOutputs(t *testing.T) (required, optional map[string]verbSpec) 
 }
 
 // envelopeKeys marshals Result.Fields exactly as cmd/seed emit() does and
-// returns the envelope's key set — asserting through the wire shape, not
+// returns the envelope's key set, asserting through the wire shape, not
 // Go internals.
 func envelopeKeys(t *testing.T, r *Result) map[string]bool {
 	t.Helper()

@@ -5,7 +5,7 @@
 // Compose is the same mechanism pointed at multiple sources: skills
 // install side by side under skills/managed/ and flow through the
 // existing `seed sync` fan-out. Install prunes ONLY the managed
-// directory — local skills outside it are never touched. Skill updates
+// directory: local skills outside it are never touched. Skill updates
 // arrive as ordinary PRs whose diff shows the new content; injection
 // review happens in the review pane, never at install time.
 package skills
@@ -41,7 +41,7 @@ type Source struct {
 // Compose declares a *generated* skill (skillfold semantics,
 // inspirations/05): its SKILL.md concatenates the used skills' bodies in
 // declared order, headings demoted under a root heading, with supporting
-// files carried over. Composed skills are not locked — they are
+// files carried over. Composed skills are not locked: they are
 // deterministic functions of locked inputs, regenerated at install.
 type Compose struct {
 	Name        string   `yaml:"name" json:"name"`
@@ -69,7 +69,7 @@ type Lock struct {
 func refuse(msg string, a ...any) error { return fmt.Errorf(msg, a...) }
 
 // LoadManifest parses seed.yaml strictly (unknown keys refused). A
-// missing file is an empty manifest — fresh instantiations pay nothing.
+// missing file is an empty manifest: fresh instantiations pay nothing.
 func LoadManifest(root string) (*Manifest, error) {
 	raw, err := os.ReadFile(filepath.Join(root, ManifestPath))
 	if err != nil {
@@ -134,7 +134,7 @@ func LoadManifest(root string) (*Manifest, error) {
 }
 
 // composeOrder returns compose names in topological (dependency-first)
-// order — compose-of-compose is allowed; a cycle is a refusal naming its
+// order: compose-of-compose is allowed; a cycle is a refusal naming its
 // path.
 func composeOrder(m *Manifest) ([]string, error) {
 	byName := map[string]*Compose{}
@@ -505,7 +505,7 @@ func generateCompose(managed string, c Compose) error {
 	return os.WriteFile(filepath.Join(dest, "SKILL.md"), []byte(b.String()), 0o644)
 }
 
-// frozenCheck refuses when seed.yaml and seed.lock disagree — an
+// frozenCheck refuses when seed.yaml and seed.lock disagree: an
 // unlocked manifest edit.
 func frozenCheck(m *Manifest, lock *Lock) error {
 	locked := map[string]LockEntry{}

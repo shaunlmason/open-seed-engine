@@ -137,7 +137,7 @@ func Validate(root, path string, withHarnesses bool) []Finding {
 			}
 		}
 
-		// Rule 7: artifact closure — every consumes is produced by a step
+		// Rule 7: artifact closure, every consumes is produced by a step
 		// reachable through depends_on.
 		reach := reachable(s, byID)
 		for _, c := range s.Consumes {

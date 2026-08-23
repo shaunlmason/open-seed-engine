@@ -1,7 +1,7 @@
 // Package task orchestrates port verbs over the filecards backend: it loads
 // fresh state from the seed-state ref, asks the table-driven evaluator
 // (internal/port) whether the operation is legal, applies the spec-declared
-// effects, and commits card mutation + run-log event atomically — one commit
+// effects, and commits card mutation + run-log event atomically: one commit
 // per verb (§7.2). No transition or class logic lives here; it all comes from
 // the spec tables.
 package task
@@ -52,7 +52,7 @@ func failure(code int, name string, fields map[string]any) *Result {
 }
 
 // NewService loads spec + config from root and enforces the protocol-version
-// check (exit 10) before any verb runs — the shim is the enforcement point.
+// check (exit 10) before any verb runs: the shim is the enforcement point.
 func NewService(root string) (*Service, error) {
 	seedDir := filepath.Join(root, ".seed")
 	s, err := spec.Load(filepath.Join(seedDir, "port-schema"))
@@ -68,7 +68,7 @@ func NewService(root string) (*Service, error) {
 	}
 	// Builtin store selection (§7.1 amendment): filecards is the git state
 	// ref; fastcards is the machine-local SQLite store. External backends
-	// never reach this constructor — the CLI dispatches them to their
+	// never reach this constructor: the CLI dispatches them to their
 	// plugin first.
 	var store stateref.Backing
 	if cfg.Coordination.Backend == "fastcards" {
@@ -283,7 +283,7 @@ func (sv *Service) Claim(id, actor, lease string) *Result {
 			if c.Claim != nil {
 				data["holder"] = c.Claim.Actor
 				data["lease_expires"] = c.Claim.LeaseExpires
-				// §7.1: "task now claimed by another → exit 2" — a card that
+				// §7.1: "task now claimed by another → exit 2", a card that
 				// left ready under someone's claim is contention, not an
 				// invalid transition.
 				if out.Code == spec.ExitInvalid {
@@ -314,7 +314,7 @@ func (sv *Service) Claim(id, actor, lease string) *Result {
 }
 
 // TransitionArgs covers the generic transition verb, the release/close
-// composites, and every named operator verb — the evaluator decides.
+// composites, and every named operator verb: the evaluator decides.
 type TransitionArgs struct {
 	Verb, ID, To, Actor, Token string
 	BlockedOn                  string // entry for block/parking
@@ -356,7 +356,7 @@ func (sv *Service) Transition(a TransitionArgs) *Result {
 }
 
 // applyEffects turns the evaluator's spec-declared effects into concrete card
-// mutations, handoff stubs, cascade updates, and run-log events — all inside
+// mutations, handoff stubs, cascade updates, and run-log events: all inside
 // the verb's single commit.
 func (sv *Service) applyEffects(head string, c *card.Card, out port.Outcome, a TransitionArgs, mut *stateref.Mutation) ([]string, error) {
 	now := sv.now()
@@ -486,7 +486,7 @@ func (sv *Service) handoffStub(c *card.Card, prior *card.Claim, out port.Outcome
 
 // Comment and AttachEvidence are fenced while the card holds a claim.
 // Both mint a stable record id (verbs.json declares comment_id and
-// evidence_id as required outputs — plan os-61967950): the id is stamped
+// evidence_id as required outputs: plan os-61967950): the id is stamped
 // into the appended card-body section so it is resolvable by reading the
 // card, and returned in the envelope.
 func (sv *Service) Append(kind, id, actor, token, body, ref string) *Result {

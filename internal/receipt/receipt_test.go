@@ -182,7 +182,7 @@ func TestVerifyStalePlanThenAmendmentFlow(t *testing.T) {
 	}
 
 	// Amendment flow: bring the base in (merge-base updates), regenerate the
-	// receipt against the amended plan — prior work is salvaged, not reset.
+	// receipt against the amended plan: prior work is salvaged, not reset.
 	f.git("merge", "-q", "--no-edit", "main")
 	f.generateAndCommitReceipt("os-3333")
 	rep, err = Verify(f.repo, "os-3333", "main", "seed/os-3333", Options{RunValidation: true})

@@ -13,7 +13,7 @@ import (
 )
 
 // runWorkflow: `seed workflow validate|run` (plan os-52b9aed0). Not a port
-// verb — workflows are the intra-run DAG; any task-state mutation a step
+// verb: workflows are the intra-run DAG; any task-state mutation a step
 // makes goes through `scripts/seed task <verb>` like every other caller.
 func runWorkflow(args []string, stdout, stderr *os.File) int {
 	if len(args) == 0 {

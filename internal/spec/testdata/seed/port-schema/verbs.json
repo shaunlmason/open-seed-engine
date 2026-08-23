@@ -1,5 +1,5 @@
 {
-  "$comment": "The port verb surface: nine REQUIRED verbs (research/10 §5.1 as amended by erratum) plus optional capabilities backends declare in backend.toml. Args are CLI flags on `seed task <verb>`; outputs are fields in the envelope (envelope.schema.json). Transition legality, classes, and effects come from transitions.json — this file only describes I/O shapes.",
+  "$comment": "The port verb surface: nine REQUIRED verbs (research/10 §5.1 as amended by erratum) plus optional capabilities backends declare in backend.toml. Args are CLI flags on `seed task <verb>`; outputs are fields in the envelope (envelope.schema.json). Transition legality, classes, and effects come from transitions.json: this file only describes I/O shapes.",
   "schema_version": "1.0",
   "required": {
     "create": {

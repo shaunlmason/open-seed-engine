@@ -210,7 +210,7 @@ func withService(stdout, stderr *os.File, f func(*task.Service) *task.Result) in
 
 // runUpgrade is not a port verb: it has its own exit map (0/1/7/64) and
 // bypasses the task service (it must run even when the pinned engine and
-// spec would disagree — that disagreement is what it fixes).
+// spec would disagree: that disagreement is what it fixes).
 func runUpgrade(args []string, stdout, stderr *os.File) int {
 	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -363,7 +363,7 @@ func runTask(args []string, stdout, stderr *os.File) int {
 		return exitUsage
 	}
 	// External-backend dispatch (§7.1): when the configured backend's manifest
-	// entry is not builtin, every task verb is executed by the plugin — the
+	// entry is not builtin, every task verb is executed by the plugin: the
 	// shim only verifies, sandboxes, and validates.
 	if cwd, err := os.Getwd(); err == nil {
 		if root, found := config.FindRoot(cwd); found {

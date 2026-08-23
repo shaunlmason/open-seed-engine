@@ -195,7 +195,7 @@ func TestImportAndResumeEdges(t *testing.T) {
 	}
 }
 
-// Git-store paths: replay lint, anchors, and the state-lint noRef note —
+// Git-store paths: replay lint, anchors, and the state-lint noRef note,
 // none of which the machine-local store can exercise.
 func TestGitStoreLintReplayAndAnchor(t *testing.T) {
 	h := newHarness(t)

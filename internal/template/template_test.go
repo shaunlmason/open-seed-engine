@@ -64,7 +64,7 @@ func fixture(t *testing.T) (string, string) {
 	run(t, up, "commit", "-qm", "v0.1.0")
 	run(t, up, "tag", "-a", "v0.1.0", "-m", "v0.1.0")
 
-	// v0.2.0: handbook edited (top line — mergeable against a bottom-line
+	// v0.2.0: handbook edited (top line, mergeable against a bottom-line
 	// local edit), scripts/seed rewritten (conflicts with a local rewrite),
 	// OLD.md deleted, NEW.md added, .seed/version bumped, upstream plan
 	// changed (must never reach the consumer).
@@ -79,8 +79,8 @@ func fixture(t *testing.T) (string, string) {
 	run(t, up, "commit", "-qm", "v0.2.0")
 	run(t, up, "tag", "-a", "v0.2.0", "-m", "v0.2.0")
 
-	// Consumer: a "Use this template" copy of v0.1.0 — no upstream
-	// history, provenance only in the lock — plus local edits.
+	// Consumer: a "Use this template" copy of v0.1.0, no upstream
+	// history, provenance only in the lock, plus local edits.
 	con := t.TempDir()
 	run(t, con, "init", "-q", "-b", "main")
 	files := run(t, up, "ls-tree", "-r", "--name-only", "v0.1.0")
@@ -148,7 +148,7 @@ func TestUpgradeMergesOntoBranch(t *testing.T) {
 	t.Fatalf("handbook not reported merged: %+v", res.Merged)
 merged:
 
-	// Genuine conflict: both rewrote scripts/seed — markers staged.
+	// Genuine conflict: both rewrote scripts/seed, markers staged.
 	sc, _ := branchFile(t, con, res.Branch, "scripts/seed")
 	if !strings.Contains(sc, "<<<<<<<") || !strings.Contains(sc, "echo local") || !strings.Contains(sc, "echo v2") {
 		t.Fatalf("conflict markers missing:\n%s", sc)

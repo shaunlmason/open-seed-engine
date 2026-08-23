@@ -206,8 +206,8 @@ func TestMissingRefRefused(t *testing.T) {
 }
 
 // Compose (skillfold semantics, plan os-6f3104db as amended): a compose
-// entry generates a new skill from an ordered use list — concatenated
-// bodies with heading demotion, supporting files carried over — with
+// entry generates a new skill from an ordered use list: concatenated
+// bodies with heading demotion, supporting files carried over, with
 // existence/self-use/cycle refusals and compose-of-compose in
 // topological order.
 func TestComposeGeneratesSkill(t *testing.T) {

@@ -132,7 +132,7 @@ func TestStateLintCatchesForgedTransitionAndHalts(t *testing.T) {
 	mustOK(t, a.Init())
 	id := createReady(t, a, "forged card")
 
-	// Attacker with push access hand-edits the card straight to done —
+	// Attacker with push access hand-edits the card straight to done,
 	// bypassing the shim (fast-forward, so push protections don't fire).
 	head, err := a.Store.Sync()
 	if err != nil {

@@ -1,6 +1,6 @@
 // Package upgrade implements `seed upgrade` (open-seed R8, plan
 // os-4a347bd1): move the template's engine pin (.seed/engine.lock) against
-// tagged releases — resolve the target, fetch and validate its checksums,
+// tagged releases: resolve the target, fetch and validate its checksums,
 // preflight protocol compatibility, and rewrite the lockfile atomically.
 // The command NEVER touches git: engine.lock is control surface, and the
 // human gate (a reviewed PR) stays exactly where it is; the success output
@@ -55,7 +55,7 @@ type Options struct {
 	BaseURL          string // override for tests; non-HTTPS refused unless loopback
 }
 
-// The six archives the bootstrap shims download — exact filenames including
+// The six archives the bootstrap shims download: exact filenames including
 // extension (scripts/seed uses .tar.gz, scripts/seed.ps1 uses .zip).
 var platforms = []struct {
 	Key string // lockfile suffix: sha256_<Key>
@@ -179,7 +179,7 @@ func baseURL(opts Options) (string, *Err) {
 	return strings.TrimRight(opts.BaseURL, "/"), nil
 }
 
-// noFollow returns the Location of a redirect without following it — Go's
+// noFollow returns the Location of a redirect without following it: Go's
 // default client would follow to a 200 and discard the header. Used ONLY
 // for the latest-tag resolution; asset fetches use assetClient, which
 // follows redirects (GitHub serves release assets via a 302 to its CDN).
@@ -299,7 +299,7 @@ func Run(opts Options) (*Result, *Err) {
 	dl := base + "/" + lf.repo + "/releases/download/" + target
 
 	// Protocol preflight: an incompatible release must be refused BEFORE
-	// writing — the alternative is a pin whose every scripts/seed
+	// writing: the alternative is a pin whose every scripts/seed
 	// invocation (upgrade included) exits 10.
 	proto, code, e := fetch(dl + "/protocol.txt")
 	if e != nil {
@@ -408,9 +408,9 @@ func Run(opts Options) (*Result, *Err) {
 }
 
 // Shared release-resolution helpers (plan os-23494e11): `seed template
-// upgrade` resolves its target exactly as `seed upgrade` does — the same
+// upgrade` resolves its target exactly as `seed upgrade` does: the same
 // no-follow redirect read, the same base-URL override rule, the same
-// semver gate — so the logic is exported here rather than duplicated.
+// semver gate, so the logic is exported here rather than duplicated.
 
 // ResolveBaseURL applies the HTTPS-or-loopback override rule to an
 // optional base-URL override ("" = https://github.com).

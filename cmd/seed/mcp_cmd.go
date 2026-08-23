@@ -9,7 +9,7 @@ import (
 	"github.com/shaunlmason/open-seed-engine/internal/task"
 )
 
-// runMCP: `seed mcp serve` (plan os-67a1bf14) — the v2 transport: MCP
+// runMCP: `seed mcp serve` (plan os-67a1bf14), the v2 transport: MCP
 // over stdio, one tool per port verb, dispatching through the identical
 // service path the CLI uses. The CLI stays the source of truth.
 func runMCP(args []string, stdout, stderr *os.File) int {
