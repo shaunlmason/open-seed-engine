@@ -272,3 +272,71 @@ func TestDemoteLeavesFencesAlone(t *testing.T) {
 		t.Fatalf("demote:\n%q\nwant\n%q", got, want)
 	}
 }
+
+func TestGitURLAndFrontmatterHelpers(t *testing.T) {
+	cases := map[string]string{
+		"owner/name":         "https://github.com/owner/name.git",
+		"https://host/x.git": "https://host/x.git",
+		"/abs/path":          "/abs/path",
+		"./rel/path":         "./rel/path",
+	}
+	for in, want := range cases {
+		if got := gitURL(in); got != want {
+			t.Errorf("gitURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+	fm := map[string]string{
+		"---\nname: x\n---\nbody\n": "body\n",
+		"no frontmatter here":       "no frontmatter here",
+		"---\nunterminated":         "---\nunterminated",
+	}
+	for in, want := range fm {
+		if got := stripFrontmatter(in); got != want {
+			t.Errorf("stripFrontmatter(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestInstallAndLockErrorPaths(t *testing.T) {
+	// Bad lock JSON.
+	r := root(t, "schema_version: \"1\"\nskills: []\n")
+	write(t, r, LockPath, "{{{")
+	if _, err := Install(r, false); err == nil {
+		t.Fatal("bad lock installed")
+	}
+	// A locked source that no longer exists: install refuses at fetch.
+	src := sourceRepo(t)
+	r2 := root(t, "schema_version: \"1\"\nskills:\n  - {name: alpha, repo: "+src+", ref: v1, path: skills/alpha}\n")
+	if _, err := LockAll(r2); err != nil {
+		t.Fatal(err)
+	}
+	os.RemoveAll(src)
+	if _, err := Install(r2, false); err == nil {
+		t.Fatal("vanished source installed")
+	}
+	// A compose input without SKILL.md is refused at generation.
+	src2 := t.TempDir()
+	run(t, src2, "init", "-q", "-b", "main")
+	write(t, src2, "skills/noskill/helper.sh", "echo\n")
+	run(t, src2, "add", "-A")
+	run(t, src2, "commit", "-qm", "v1")
+	run(t, src2, "tag", "v1")
+	r3 := root(t, "schema_version: \"1\"\nskills:\n  - {name: noskill, repo: "+src2+", ref: v1, path: skills/noskill}\ncompose:\n  - {name: c, use: [noskill]}\n")
+	if _, err := LockAll(r3); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Install(r3, false); err == nil || !strings.Contains(err.Error(), "SKILL.md") {
+		t.Fatalf("compose without SKILL.md: %v", err)
+	}
+	// Unknown schema_version in the manifest.
+	r4 := root(t, "schema_version: \"7\"\nskills: []\n")
+	if _, err := LoadManifest(r4); err == nil {
+		t.Fatal("wrong schema accepted")
+	}
+	// Comments-only manifest parses as empty.
+	r5 := root(t, "# nothing but a comment\n")
+	m, err := LoadManifest(r5)
+	if err != nil || len(m.Skills) != 0 {
+		t.Fatalf("comments-only manifest: %+v %v", m, err)
+	}
+}

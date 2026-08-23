@@ -288,3 +288,21 @@ func TestVerifyRefusesNonTaskBranch(t *testing.T) {
 		t.Fatal("merge-group ref accepted as task branch")
 	}
 }
+
+func TestSameCommandsAndWriteFile(t *testing.T) {
+	a := []Validation{{Cmd: "x"}, {Cmd: "y"}}
+	if !sameCommands(a, []Validation{{Cmd: "x"}, {Cmd: "y"}}) {
+		t.Fatal("equal command sets differ")
+	}
+	if sameCommands(a, []Validation{{Cmd: "x"}}) || sameCommands(a, []Validation{{Cmd: "x"}, {Cmd: "z"}}) {
+		t.Fatal("unequal command sets matched")
+	}
+	r := &Receipt{SchemaVersion: "1.0", Task: "os-t"}
+	root := t.TempDir()
+	if err := r.WriteFile(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(Path(root, "os-t")); err != nil {
+		t.Fatal("receipt not written")
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -102,5 +103,106 @@ func TestCheckVersion(t *testing.T) {
 	err = CheckVersion(s, dir)
 	if _, ok := err.(*VersionMismatch); !ok {
 		t.Fatalf("want VersionMismatch, got %v", err)
+	}
+}
+
+func TestLoadRefusalsAndVersionMismatch(t *testing.T) {
+	// Missing directory.
+	if _, err := Load(t.TempDir()); err == nil {
+		t.Fatal("empty dir loaded")
+	}
+	// Unparseable port.json.
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "port.json"), []byte("{"), 0o644)
+	if _, err := Load(dir); err == nil {
+		t.Fatal("bad JSON loaded")
+	}
+	// An internally inconsistent spec surfaces joined validation errors.
+	b, err := os.ReadFile(filepath.Join(testdataSchema, "port.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(dir, "port.json"), b, 0o644)
+	os.WriteFile(filepath.Join(dir, "transitions.json"),
+		[]byte(`{"schema_version":"1.0","effect_vocabulary":{},"transitions":[{"verb":"x","from":"nowhere","to":"nowhither","class":"worker"}],"composite_verbs":{}}`), 0o644)
+	_, err = Load(dir)
+	if err == nil || !strings.Contains(err.Error(), "invalid spec") {
+		t.Fatalf("inconsistent spec loaded: %v", err)
+	}
+
+	vm := &VersionMismatch{Repo: 1, Spec: 2}
+	if !strings.Contains(vm.Error(), ".seed/version=1") {
+		t.Fatalf("VersionMismatch.Error: %q", vm.Error())
+	}
+}
+
+func TestNeedsTokenDefaults(t *testing.T) {
+	no, yes := false, true
+	cases := []struct {
+		tr   Transition
+		want bool
+	}{
+		{Transition{Class: "worker"}, true},
+		{Transition{Class: "operator"}, false},
+		{Transition{Class: "worker", RequiresToken: &no}, false},
+		{Transition{Class: "operator", RequiresToken: &yes}, true},
+	}
+	for i, c := range cases {
+		if got := c.tr.NeedsToken(); got != c.want {
+			t.Fatalf("case %d: NeedsToken=%v want %v", i, got, c.want)
+		}
+	}
+}
+
+func TestValidateStructuralErrors(t *testing.T) {
+	f := false
+	tr := true
+	s := &Spec{}
+	s.Port.States = []string{"ready", "done"}
+	s.Port.TerminalStates = []string{"done", "vanished"}
+	s.Table.EffectVocabulary = map[string]string{"mint_token": "m"}
+	s.Table.Transitions = []Transition{
+		// claim violating all three claim invariants at once.
+		{From: "ready", To: "ready", Verb: "claim", Class: "operator",
+			RequiresToken: &tr, Effects: []string{"ghost_effect"},
+			OperatorOverrides: []Override{{Name: "o", Effects: []string{"other_ghost"}}}},
+		// outgoing edge from a terminal state.
+		{From: "done", To: "ready", Verb: "reopen", Class: "operator", RequiresToken: &f},
+	}
+	s.Table.CompositeVerbs = map[string]CompositeVerb{"finish": {ExpandsTo: "nothing"}}
+	errs := s.Validate()
+	joined := ""
+	for _, e := range errs {
+		joined += e.Error() + "\n"
+	}
+	for _, want := range []string{
+		"terminal state \"vanished\"",
+		"outgoing edge from terminal state",
+		"claim must not require a token",
+		"claim must be worker-class",
+		"claim must mint_token",
+		"effect \"ghost_effect\" not in vocabulary",
+		"override o: effect \"other_ghost\" not in vocabulary",
+		"expands to unknown verb",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in:\n%s", want, joined)
+		}
+	}
+}
+
+func TestRepoProtocolVersionErrors(t *testing.T) {
+	if _, err := RepoProtocolVersion(t.TempDir()); err == nil {
+		t.Fatal("missing version file tolerated")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "version"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RepoProtocolVersion(dir); err == nil {
+		t.Fatal("non-numeric version tolerated")
+	}
+	if err := CheckVersion(&Spec{}, dir); err == nil {
+		t.Fatal("CheckVersion swallowed the read error")
 	}
 }

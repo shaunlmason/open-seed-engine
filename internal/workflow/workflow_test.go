@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -531,5 +532,137 @@ func TestStubHonorsConstEnumDefault(t *testing.T) {
 	res, err = Run(RunOptions{Root: root, Name: "strict", Mock: true})
 	if err != nil || res.Status != "failed" || !strings.Contains(res.Steps["a"].Note, "schema") {
 		t.Fatalf("unguessable constraint not surfaced: %v %+v", err, res.Steps)
+	}
+}
+
+func TestListAndRunsBase(t *testing.T) {
+	root := t.TempDir()
+	// No workflows dir: empty, no error.
+	files, err := List(root)
+	if err != nil || files != nil {
+		t.Fatalf("List on empty root: %v %v", files, err)
+	}
+	if err := os.MkdirAll(Dir(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(Dir(root), "b.yaml"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(Dir(root), "a.yml"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(Dir(root), "notes.txt"), []byte("x"), 0o644)
+	files, err = List(root)
+	if err != nil || len(files) != 2 || !strings.HasSuffix(files[0], "a.yml") {
+		t.Fatalf("List: %v %v", files, err)
+	}
+
+	// runsBase: env override wins; otherwise the git common dir; a bare
+	// directory is an error.
+	t.Setenv("SEED_RUNS_DIR", "/tmp/override-runs")
+	if got, err := runsBase(root); err != nil || got != "/tmp/override-runs" {
+		t.Fatalf("runsBase override: %q %v", got, err)
+	}
+	t.Setenv("SEED_RUNS_DIR", "")
+	if _, err := runsBase(root); err == nil {
+		t.Fatal("runsBase outside a repo passed")
+	}
+	gdir := t.TempDir()
+	cmd := exec.Command("git", "init", "-q", gdir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	got, err := runsBase(gdir)
+	if err != nil || !strings.HasSuffix(got, "seed-runs") {
+		t.Fatalf("runsBase in repo: %q %v", got, err)
+	}
+
+	if s := (Finding{Rule: 3, Msg: "boom"}).String(); s != "rule 3: boom" {
+		t.Fatalf("Finding.String: %q", s)
+	}
+}
+
+func TestValidateGreenPathsAndReadErrors(t *testing.T) {
+	root := mkroot(t)
+	// Unreadable file: a finding, not a panic.
+	fs := Validate(root, filepath.Join(root, ".seed", "workflows", "ghost.yaml"), false)
+	if len(fs) == 0 {
+		t.Fatal("missing file validated")
+	}
+	// A workflow using every optional surface validly: role + prompt_file
+	// + gates-free typed produces + adapters present under
+	// --with-harnesses.
+	os.MkdirAll(filepath.Join(root, ".seed", "workflows", "prompts"), 0o755)
+	os.WriteFile(filepath.Join(root, ".seed", "workflows", "prompts", "p.md"), []byte("do it"), 0o644)
+	body := hdr("rich") + `inputs:
+  - {name: n, type: string, required: false}
+steps:
+  - id: plan
+    role: planner
+    prompt_file: prompts/p.md
+    produces: [{name: plan, file: artifacts/plan.md}]
+  - id: build
+    run: "echo {{inputs.n}} && cat {{output.plan.path}}"
+    depends_on: [plan]
+`
+	path := writeWF(t, root, "rich", body)
+	if fs := Validate(root, path, true); len(fs) != 0 {
+		t.Fatalf("rich workflow flagged: %v", fs)
+	}
+	// Roles closure listing.
+	roles, err := Roles(root)
+	if err != nil || len(roles) != 3 {
+		t.Fatalf("Roles: %v %v", roles, err)
+	}
+}
+
+func TestMockRunTypedProducesAndCheckpointRefusals(t *testing.T) {
+	root := mkroot(t)
+	os.MkdirAll(filepath.Join(root, ".seed", "workflows", "schemas"), 0o755)
+	os.WriteFile(filepath.Join(root, ".seed", "workflows", "schemas", "j.json"),
+		[]byte(`{"type":"object","properties":{"n":{"type":"number"},"b":{"type":"boolean"},"s":{"type":"string","enum":["one","two"]}},"required":["n","b","s"]}`), 0o644)
+	body := hdr("typed") + `steps:
+  - id: a
+    run: "echo would-make-artifacts"
+    produces:
+      - {name: j, file: artifacts/j.json, schema: schemas/j.json}
+      - {name: t, file: artifacts/t.txt}
+`
+	path := writeWF(t, root, "typed", body)
+	if fs := Validate(root, path, false); len(fs) != 0 {
+		t.Fatalf("typed workflow flagged: %v", fs)
+	}
+	res, err := Run(RunOptions{Root: root, Name: "typed", Mock: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "succeeded" {
+		t.Fatalf("mock run failed: step a: %+v", res.Steps["a"])
+	}
+	// The mock stub honored the schema: enum pinned, number/boolean typed.
+	b, err := os.ReadFile(filepath.Join(res.RunDir, "artifacts", "j.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("stub not JSON: %v (%s)", err, b)
+	}
+	if doc["s"] != "one" {
+		t.Fatalf("enum not pinned: %v", doc)
+	}
+	if _, isNum := doc["n"].(float64); !isNum {
+		t.Fatalf("number stub wrong: %T", doc["n"])
+	}
+	if _, isBool := doc["b"].(bool); !isBool {
+		t.Fatalf("boolean stub wrong: %T", doc["b"])
+	}
+
+	// Resume refusals: a succeeded run refuses; a corrupt checkpoint too.
+	if _, err := Run(RunOptions{Root: root, Name: "typed", Mock: true, Resume: res.RunID}); err == nil {
+		t.Fatal("resume of a succeeded run accepted")
+	}
+	ckpt := filepath.Join(res.RunDir, "checkpoint.json")
+	if _, statErr := os.Stat(ckpt); statErr == nil {
+		os.WriteFile(ckpt, []byte("{{{"), 0o644)
+		if _, err := Run(RunOptions{Root: root, Name: "typed", Mock: true, Resume: res.RunID}); err == nil {
+			t.Fatal("corrupt checkpoint accepted")
+		}
 	}
 }

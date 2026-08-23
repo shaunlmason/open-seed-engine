@@ -198,3 +198,101 @@ func TestLifecycleOverMCP(t *testing.T) {
 		t.Fatalf("unknown tool accepted: %v", resp)
 	}
 }
+
+// Every tool gets called at least once: the handlers are closures, so
+// only invocation covers them; refusals ride isError, never transport
+// errors.
+func TestFullToolSurfaceOverMCP(t *testing.T) {
+	root := fixtureRoot(t)
+	w := startServer(t, root)
+	defer w.in.Close()
+	w.call("initialize", map[string]any{"protocolVersion": protocolVersion, "capabilities": map[string]any{}})
+	// notifications get no response; follow with a real call to resync.
+	req := map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"}
+	b, _ := json.Marshal(req)
+	if _, err := w.in.Write(append(b, '\n')); err != nil {
+		t.Fatal(err)
+	}
+
+	sv, err := task.NewService(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := sv.Init(); r.Code != 0 {
+		t.Fatalf("init: %+v", r)
+	}
+
+	env, isErr := w.tool("task_create", map[string]any{"title": "Sweep", "actor": "a", "squad": "core", "priority": "P1"})
+	if isErr {
+		t.Fatalf("create: %v", env)
+	}
+	id := env["task"].(string)
+
+	if env, isErr = w.tool("task_list", map[string]any{"state": "backlog"}); isErr {
+		t.Fatalf("list: %v", env)
+	}
+	if env, isErr = w.tool("task_promote", map[string]any{"task": id, "actor": "lead"}); isErr {
+		t.Fatalf("promote: %v", env)
+	}
+	if env, isErr = w.tool("task_deprioritize", map[string]any{"task": id, "actor": "lead"}); isErr {
+		t.Fatalf("deprioritize: %v", env)
+	}
+	w.tool("task_promote", map[string]any{"task": id, "actor": "lead"})
+	if env, isErr = w.tool("task_block", map[string]any{"task": id, "actor": "lead", "blocked_on": "plan:3"}); isErr {
+		t.Fatalf("block: %v", env)
+	}
+	if env, isErr = w.tool("task_plan_unblock", map[string]any{"task": id, "pr": "3", "actor": "lead"}); isErr {
+		t.Fatalf("plan_unblock: %v", env)
+	}
+	w.tool("task_block", map[string]any{"task": id, "actor": "lead", "blocked_on": "manual:lead"})
+	if env, isErr = w.tool("task_unblock", map[string]any{"task": id, "actor": "lead", "blocked_on": "manual:lead"}); isErr {
+		t.Fatalf("unblock: %v", env)
+	}
+
+	env, _ = w.tool("task_claim", map[string]any{"task": id, "actor": "agent-1", "lease": "30m"})
+	tok := env["claim_token"].(string)
+	if env, isErr = w.tool("task_attach_evidence", map[string]any{"task": id, "actor": "agent-1", "kind": "log", "ref": "r", "token": tok}); isErr || env["evidence_id"] == nil {
+		t.Fatalf("attach: %v", env)
+	}
+	if env, isErr = w.tool("task_release", map[string]any{"task": id, "actor": "agent-1", "token": tok}); isErr {
+		t.Fatalf("release: %v", env)
+	}
+	env, _ = w.tool("task_claim", map[string]any{"task": id, "actor": "agent-1"})
+	tok = env["claim_token"].(string)
+	w.tool("task_transition", map[string]any{"task": id, "to": "review", "actor": "agent-1", "token": tok})
+	if env, isErr = w.tool("task_reject", map[string]any{"task": id, "actor": "lead", "resolution": "no"}); isErr {
+		t.Fatalf("reject: %v", env)
+	}
+	if env, isErr = w.tool("task_cancel", map[string]any{"task": id, "actor": "lead", "resolution": "done with this"}); isErr {
+		t.Fatalf("cancel: %v", env)
+	}
+	if env, isErr = w.tool("task_reinstate", map[string]any{"task": id, "actor": "lead"}); isErr {
+		t.Fatalf("reinstate: %v", env)
+	}
+	if env, isErr = w.tool("task_ready", map[string]any{"actor": "agent-2", "squad": "core"}); isErr {
+		t.Fatalf("ready: %v", env)
+	}
+
+	// Transport-level faults: bad params shape and a broken service.
+	resp := w.call("tools/call", map[string]any{"name": "task_get", "arguments": "not-an-object"})
+	if resp["error"] == nil {
+		t.Fatalf("bad params accepted: %v", resp)
+	}
+}
+
+func TestBackendUnavailableEnvelope(t *testing.T) {
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	go func() {
+		defer outW.Close()
+		_ = Serve(inR, outW, func() (*task.Service, error) { return nil, fmt.Errorf("boom") })
+	}()
+	sc := bufio.NewScanner(outR)
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	w := &wire{t: t, in: inW, out: sc}
+	defer w.in.Close()
+	env, isErr := w.tool("task_get", map[string]any{"task": "os-x"})
+	if !isErr || env["error"] != "backend_unavailable" {
+		t.Fatalf("service failure not surfaced: %v %v", isErr, env)
+	}
+}

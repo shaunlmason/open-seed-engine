@@ -313,3 +313,34 @@ func TestVendorLineWarns(t *testing.T) {
 		t.Fatalf("vendor warning missing from notes: %+v", res.Notes)
 	}
 }
+
+func TestExportedResolversAndErrString(t *testing.T) {
+	if (&Err{Name: "n", Msg: "m"}).Error() != "n: m" {
+		t.Fatal("Err.Error shape")
+	}
+	if _, e := ResolveBaseURL("http://insecure.example"); e == nil {
+		t.Fatal("non-HTTPS non-loopback base accepted")
+	}
+	if got, e := ResolveBaseURL("https://ok.example"); e != nil || got != "https://ok.example" {
+		t.Fatalf("https base: %q %v", got, e)
+	}
+	f := &fakeRelease{latest: "v1.2.3", checksums: map[string]string{}, protocols: map[string]string{}}
+	srv := httptest.NewServer(f.handler())
+	defer srv.Close()
+	tag, e := ResolveLatest(srv.URL, "shaunlmason/open-seed-engine")
+	if e != nil || tag != "v1.2.3" {
+		t.Fatalf("ResolveLatest: %q %v", tag, e)
+	}
+	for _, c := range []struct {
+		a, b string
+		want int
+	}{{"v1.0.0", "v1.0.1", -1}, {"v2.0.0", "v2.0.0", 0}, {"v2.1.0", "v2.0.9", 1}} {
+		got, e := CompareTags(c.a, c.b)
+		if e != nil || got != c.want {
+			t.Fatalf("CompareTags(%s,%s)=%d %v", c.a, c.b, got, e)
+		}
+	}
+	if _, e := CompareTags("nonsense", "v1.0.0"); e == nil {
+		t.Fatal("bad tag compared")
+	}
+}

@@ -131,3 +131,173 @@ func TestManagedSkillsFanOutFlat(t *testing.T) {
 		}
 	}
 }
+
+func TestFanOutSelectivityAndAgentsEdges(t *testing.T) {
+	root := setup(t)
+	write := func(p, c string) {
+		full := filepath.Join(root, p)
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		if err := os.WriteFile(full, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Non-matching entries in the agents dir are skipped, dirs too.
+	write(".seed/agents/notes.txt", "not a role")
+	os.MkdirAll(filepath.Join(root, ".seed/agents/subdir"), 0o755)
+	// Skills dir containing a stray file (not a dir): skipped.
+	write("skills/README.md", "not a skill dir")
+	if _, err := Apply(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".claude/agents/notes.txt")); !os.IsNotExist(err) {
+		t.Fatal("non-.md agent file fanned out")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".claude/skills/README.md")); !os.IsNotExist(err) {
+		t.Fatal("stray skills file fanned out")
+	}
+
+	// AGENTS.md with no managed markers: renderAgentsMD declares nothing
+	// to do; sync stays clean.
+	os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("# AGENTS.md\n\nno markers here\n"), 0o644)
+	if _, err := Apply(root); err != nil {
+		t.Fatal(err)
+	}
+	// Missing AGENTS.md entirely.
+	os.Remove(filepath.Join(root, "AGENTS.md"))
+	if _, err := Apply(root); err != nil {
+		t.Fatal(err)
+	}
+	// A rules fragment with no leading H1 keeps its first line.
+	os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte(agentsMD), 0o644)
+	write("rules/20-c.md", "- bare rule, no heading\n")
+	if _, err := Apply(root); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if !strings.Contains(string(b), "bare rule, no heading") {
+		t.Fatal("headingless fragment lost")
+	}
+}
+
+func TestPlanSourceReadErrors(t *testing.T) {
+	// .seed/agents as a regular file: the role fan-out read fails.
+	r1 := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(r1, ".seed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r1, ".seed", "agents"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Plan(r1); err == nil {
+		t.Fatal("agents-as-file tolerated")
+	}
+	if _, err := Apply(r1); err == nil {
+		t.Fatal("apply over broken sources passed")
+	}
+	if errs := Check(r1); len(errs) == 0 {
+		t.Fatal("check over broken sources passed")
+	}
+
+	// skills as a regular file: the skills fan-out read fails.
+	r2 := t.TempDir()
+	if err := os.WriteFile(filepath.Join(r2, "skills"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Plan(r2); err == nil {
+		t.Fatal("skills-as-file tolerated")
+	}
+
+	// rules as a regular file behind marked AGENTS.md: fragments fail.
+	r3 := t.TempDir()
+	if err := os.WriteFile(filepath.Join(r3, "AGENTS.md"), []byte(agentsMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r3, "rules"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Plan(r3); err == nil {
+		t.Fatal("rules-as-file tolerated")
+	}
+}
+
+func TestRenderEdgesAndStrayFiles(t *testing.T) {
+	// Begin marker with no newline after it: block is left alone.
+	r1 := t.TempDir()
+	oneLine := "<!-- seed:rules:begin --><!-- seed:rules:end -->"
+	if err := os.WriteFile(filepath.Join(r1, "AGENTS.md"), []byte(oneLine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(r1, "rules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r1, "rules", "a.md"), []byte("# T\n\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	actions, err := Plan(r1)
+	if err != nil || len(actions) != 0 {
+		t.Fatalf("headerless marker rendered: %v %v", actions, err)
+	}
+
+	// Only empty fragments: the managed block is left alone too.
+	r2 := t.TempDir()
+	if err := os.WriteFile(filepath.Join(r2, "AGENTS.md"), []byte(agentsMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(r2, "rules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r2, "rules", "empty.md"), []byte("# Just a heading\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r2, "rules", "notes.txt"), []byte("not md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	actions, err = Plan(r2)
+	if err != nil || len(actions) != 0 {
+		t.Fatalf("empty fragments rendered: %v %v", actions, err)
+	}
+
+	// Stray plain files in skills/ and skills/managed/ are skipped.
+	r3 := t.TempDir()
+	for p, c := range map[string]string{
+		"skills/README.md":            "stray",
+		"skills/managed/README.md":    "stray",
+		"skills/real/SKILL.md":        "s",
+		"skills/managed/got/SKILL.md": "m",
+	} {
+		full := filepath.Join(r3, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	actions, err = Plan(r3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range actions {
+		if strings.Contains(a.Path, "README") || strings.Contains(a.Path, "managed") {
+			t.Fatalf("stray or unflattened path fanned out: %s", a.Path)
+		}
+	}
+	if len(actions) != 4 { // real + got, each to two harness dirs
+		t.Fatalf("actions: %v", actions)
+	}
+
+	// A fan-out destination occupied by a regular file: Apply fails.
+	r4 := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(r4, ".seed", "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r4, ".seed", "agents", "dev.md"), []byte("---\nrole: dev\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(r4, ".claude"), []byte("in the way"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Apply(r4); err == nil {
+		t.Fatal("blocked destination tolerated")
+	}
+}

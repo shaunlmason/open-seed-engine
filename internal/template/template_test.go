@@ -332,3 +332,16 @@ func TestMissingTargetTagIsRefusal(t *testing.T) {
 		t.Fatalf("missing tag not refused: %v", err)
 	}
 }
+
+func TestGitFetchUnreachable(t *testing.T) {
+	_, con := fixture(t)
+	// Point the recorded repo at a nonexistent local path: the resolver is
+	// bypassed with an explicit --to, and the git fetch itself fails.
+	write(t, con, ".seed/template.lock", "repo "+filepath.Join(t.TempDir(), "gone")+"\nversion v0.1.0\n")
+	run(t, con, "add", "-A")
+	run(t, con, "commit", "-qm", "break the repo line")
+	_, err := Run(Options{Root: con, To: "v0.2.0"})
+	if err == nil || err.Code != upgrade.ExitUnreachable {
+		t.Fatalf("unreachable git host: want exit 7, got %v", err)
+	}
+}

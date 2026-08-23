@@ -136,3 +136,124 @@ func TestLockEnforcement(t *testing.T) {
 		t.Fatalf("hashless external plugin invoked: %v", err)
 	}
 }
+
+func TestLoadManifestRefusals(t *testing.T) {
+	root := t.TempDir()
+	write := func(c string) {
+		p := filepath.Join(root, ".seed", "backends", "m", "backend.toml")
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Load(root, "m"); err == nil {
+		t.Fatal("missing manifest loaded")
+	}
+	write("name = \"other\"\nschema_version = \"1.0\"\nentry = \"run\"\n[capabilities]\nrequired = true\n")
+	if _, err := Load(root, "m"); err == nil {
+		t.Fatal("name-mismatched manifest loaded")
+	}
+	write("name = \"m\"\nschema_version = \"1.0\"\n[capabilities]\nrequired = true\n")
+	if _, err := Load(root, "m"); err == nil {
+		t.Fatal("entry-less manifest loaded")
+	}
+	write("name = \"m\"\nschema_version = \"1.0\"\nentry = \"run\"\n[capabilities]\nrequired = false\n")
+	if _, err := Load(root, "m"); err == nil {
+		t.Fatal("required=false manifest loaded")
+	}
+	write("name = \"m\"\nschema_version = \"1.0\"\nentry = \"run\"\n[capabilities]\nrequired = true\n")
+	if _, err := Load(root, "m"); err != nil {
+		t.Fatalf("good manifest refused: %v", err)
+	}
+}
+
+func TestValidateEnvelopeShapes(t *testing.T) {
+	good := `{"ok": true, "schema_version": "1.0"}`
+	if err := validateEnvelope(good); err != nil {
+		t.Fatal(err)
+	}
+	for name, bad := range map[string]string{
+		"not json":        "nope",
+		"missing ok":      `{"schema_version": "1.0"}`,
+		"bad schema":      `{"ok": true, "schema_version": "9.9"}`,
+		"missing version": `{"ok": false}`,
+	} {
+		if err := validateEnvelope(bad); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+}
+
+func TestVerifyLockAndHashDirErrors(t *testing.T) {
+	root := t.TempDir()
+	if err := VerifyLock(root, "x"); err == nil {
+		t.Fatal("missing lock file tolerated")
+	}
+	lock := filepath.Join(root, ".seed", "backends.lock.json")
+	if err := os.MkdirAll(filepath.Dir(lock), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lock, []byte("{nope"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyLock(root, "x"); err == nil {
+		t.Fatal("unparseable lock tolerated")
+	}
+	// A sha-pinned entry whose plugin directory is absent.
+	if err := os.WriteFile(lock, []byte(`{"x": {"source": "git", "sha256": "deadbeef"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyLock(root, "x"); err == nil {
+		t.Fatal("missing plugin dir hashed")
+	}
+	// Present but drifted from the pin.
+	pdir := filepath.Join(root, ".seed", "backends", "x")
+	if err := os.MkdirAll(pdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pdir, "run.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := VerifyLock(root, "x")
+	if err == nil || !strings.Contains(err.Error(), "does not match lock") {
+		t.Fatalf("hash drift tolerated: %v", err)
+	}
+	// The executable bit participates in the hash.
+	h1, err := HashDir(pdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(pdir, "run.sh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h2, err := HashDir(pdir)
+	if err != nil || h1 == h2 {
+		t.Fatalf("exec bit not hashed: %s vs %s (%v)", h1, h2, err)
+	}
+}
+
+func TestExecEntryMissingAndUnrunnable(t *testing.T) {
+	root := t.TempDir()
+	lock := filepath.Join(root, ".seed", "backends.lock.json")
+	if err := os.MkdirAll(filepath.Dir(lock), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lock, []byte(`{"p": {"source": "builtin"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manifest{Name: "p", Entry: "run.sh"}
+	if _, _, err := Exec(root, m, []string{"ready"}); err == nil ||
+		!strings.Contains(err.Error(), "not found") {
+		t.Fatalf("phantom entry tolerated: %v", err)
+	}
+	pdir := filepath.Join(root, ".seed", "backends", "p")
+	if err := os.MkdirAll(pdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pdir, "run.sh"), []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Exec(root, m, []string{"ready"}); err == nil {
+		t.Fatal("non-executable entry ran")
+	}
+}

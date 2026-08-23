@@ -66,3 +66,17 @@ func TestMappingRoundTrip(t *testing.T) {
 		t.Fatalf("round trip: %v %+v", err, back)
 	}
 }
+
+func TestParseMappingEdges(t *testing.T) {
+	m, err := ParseMapping("")
+	if err != nil || m == nil || m.Cards == nil {
+		t.Fatalf("empty mapping: %+v %v", m, err)
+	}
+	if _, err := ParseMapping("{broken"); err == nil {
+		t.Fatal("broken mapping parsed")
+	}
+	m, err = ParseMapping(`{"cards": null}`)
+	if err != nil || m.Cards == nil {
+		t.Fatalf("null cards not defaulted: %+v %v", m, err)
+	}
+}

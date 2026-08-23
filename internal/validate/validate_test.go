@@ -208,3 +208,75 @@ func TestAncestryActivationLiteral(t *testing.T) {
 		t.Fatalf("inactive repo warned: %v", w)
 	}
 }
+
+func TestRoutingHelpersDirect(t *testing.T) {
+	teams := []Team{
+		{Name: "core", Scope: []string{"**"}, Priority: 1},
+		{Name: "web", Scope: []string{"web/**"}, Priority: 2, Backlog: Backlog{Labels: []string{"frontend"}}},
+		{Name: "infra", Scope: []string{"infra/**"}, Priority: 3, Backlog: Backlog{Labels: []string{"frontend", "ops"}}},
+	}
+	if got := FallbackSquad(teams); got != "core" {
+		t.Fatalf("FallbackSquad: %q", got)
+	}
+	if got := FallbackSquad(teams[1:]); got != "" {
+		t.Fatalf("no-fallback FallbackSquad: %q", got)
+	}
+	if got := ResolveSquad("explicit", []string{"frontend"}, teams); got != "explicit" {
+		t.Fatalf("explicit lost: %q", got)
+	}
+	// Lowest priority wins when several backlog filters match.
+	if got := ResolveSquad("", []string{"frontend"}, teams); got != "web" {
+		t.Fatalf("label routing: %q", got)
+	}
+	if got := ResolveSquad("", []string{"ops"}, teams); got != "infra" {
+		t.Fatalf("ops routing: %q", got)
+	}
+	if got := ResolveSquad("", nil, teams); got != "core" {
+		t.Fatalf("fallback routing: %q", got)
+	}
+}
+
+func TestTeamsWarningsCodeowners(t *testing.T) {
+	root := setup(t)
+	// Single squad: never warns, CODEOWNERS or not.
+	if w := TeamsWarnings(root); w != nil {
+		t.Fatalf("single-squad warned: %v", w)
+	}
+	// Second squad, review: codeowners, lead absent from CODEOWNERS.
+	web := strings.NewReplacer("core", "web", "priority: 1", "priority: 2", `["**"]`, `["web/**"]`, "alice", "bob").Replace(goodTeam) + "review: codeowners\n"
+	os.WriteFile(filepath.Join(root, ".seed/teams/web.yaml"), []byte(web), 0o644)
+	os.WriteFile(filepath.Join(root, "CODEOWNERS"), []byte("/web/ @alice\n"), 0o644)
+	w := TeamsWarnings(root)
+	if len(w) != 1 || !strings.Contains(w[0], "bob") {
+		t.Fatalf("missing-lead warning: %v", w)
+	}
+	// Lead present: quiet.
+	os.WriteFile(filepath.Join(root, "CODEOWNERS"), []byte("/web/ @bob\n"), 0o644)
+	if w := TeamsWarnings(root); w != nil {
+		t.Fatalf("covered lead still warned: %v", w)
+	}
+}
+
+func TestGuardrailsRefusals(t *testing.T) {
+	root := setup(t)
+	os.WriteFile(filepath.Join(root, ".seed/guardrails.yaml"), []byte(`autonomy:
+  default_tier: L3
+  max_tier: L2
+protected_paths:
+  - .seed/**
+auto_merge_allowlist:
+  - plans/**
+`), 0o644)
+	errs := GuardrailsFile(root)
+	if !hasError(errs, "exceeds max_tier") || !hasError(errs, "never auto-mergeable") {
+		t.Fatalf("guardrails violations missed: %v", errs)
+	}
+	os.WriteFile(filepath.Join(root, ".seed/guardrails.yaml"), []byte("autonomy: {default_tier: LX, max_tier: L2}\n"), 0o644)
+	if errs := GuardrailsFile(root); !hasError(errs, "L1/L2/L3") {
+		t.Fatalf("bad tier vocabulary accepted: %v", errs)
+	}
+	os.Remove(filepath.Join(root, ".seed/guardrails.yaml"))
+	if errs := Repo(root); len(errs) == 0 {
+		t.Fatal("missing guardrails accepted")
+	}
+}
