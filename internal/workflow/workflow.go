@@ -1,13 +1,13 @@
 // Package workflow implements the v2 workflow engine (plan os-52b9aed0,
-// design §148 + inspirations/04 SYNTHESIS): checked-in step DAGs under
+// design §7.3 + inspirations/04 SYNTHESIS): checked-in step DAGs under
 // .seed/workflows/<name>.yaml, validated by thirteen preflight rules and
 // executed in topological parallel waves. Workflows are the *intra-run*
 // DAG one driver executes; cards remain the inter-agent layer, and any
-// task-state mutation a step makes goes through `scripts/seed task <verb>`
-// — the executor adds no side channel to a backend.
+// task-state mutation a step makes goes through `scripts/seed task <verb>`:
+// the executor adds no side channel to a backend.
 //
 // Run state (checkpoints, artifacts) lives under
-// <git-common-dir>/seed-runs/<run-id>/ — local, shared across linked
+// <git-common-dir>/seed-runs/<run-id>/: local, shared across linked
 // worktrees, never committed (the inspirations/04 erratum).
 package workflow
 
@@ -66,7 +66,7 @@ type Step struct {
 	Run        string `yaml:"run"`
 	// tools maps onto the harness contract's SEED_PERMISSION:
 	// readonly → read-only, coding → safe-edit (default). yolo is NOT
-	// reachable from a workflow file — no tools value maps to it.
+	// reachable from a workflow file, no tools value maps to it.
 	Tools         string         `yaml:"tools"`
 	OutputFormat  map[string]any `yaml:"output_format"`
 	Consumes      []string       `yaml:"consumes"`
@@ -138,7 +138,7 @@ func LoadRegistry(root string) (*Registry, error) {
 	return &c.Workflows, nil
 }
 
-// Roles returns the declared role names — the .seed/agents/*.md role
+// Roles returns the declared role names: the .seed/agents/*.md role
 // files (validate rule 8's closure target).
 func Roles(root string) (map[string]bool, error) {
 	entries, err := os.ReadDir(filepath.Join(root, ".seed", "agents"))
