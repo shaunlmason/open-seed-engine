@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/shaunlmason/open-seed-engine/internal/config"
 	"github.com/shaunlmason/open-seed-engine/internal/plugin"
@@ -20,7 +21,7 @@ import (
 // one drift-detection story with every other fan-out.
 func runPlugin(args []string, stdout, stderr *os.File) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "seed: usage: seed plugin enable | seed plugin disable | seed plugin status [--check]")
+		fmt.Fprintln(stderr, "seed: usage: seed plugin enable [--ref <tag|branch>] | seed plugin disable | seed plugin status [--check]")
 		return exitUsage
 	}
 	cwd, err := os.Getwd()
@@ -55,7 +56,14 @@ func runPlugin(args []string, stdout, stderr *os.File) int {
 	ref := ""
 	switch {
 	case args[0] == "status" && len(args) == 2 && args[1] == "--check":
-	case args[0] == "enable" && len(args) == 3 && args[1] == "--ref" && args[2] != "":
+	case args[0] == "enable" && len(args) == 3 && args[1] == "--ref":
+		// A missing value would otherwise let the NEXT option become the
+		// ref: `enable --ref --check` would write "--check" and report it
+		// as a moving ref rather than refusing.
+		if args[2] == "" || strings.HasPrefix(args[2], "-") {
+			fmt.Fprintf(stderr, "seed plugin enable: --ref needs a tag or branch name, got %q\n", args[2])
+			return exitUsage
+		}
 		ref = args[2]
 	case len(args) > 1:
 		fmt.Fprintf(stderr, "seed plugin %s: unexpected argument %q\n", args[0], args[1])

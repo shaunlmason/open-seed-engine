@@ -382,3 +382,35 @@ func TestShortHexRefIsNotTreatedAsASHA(t *testing.T) {
 		t.Fatalf("a short hex-looking branch name must be accepted: %v", err)
 	}
 }
+
+// A lock version that is not a release tag must be caught even when the
+// pin happens to be the same string: string equality must not stand in
+// for "aligned".
+func TestBogusTemplateVersionIsNeverAligned(t *testing.T) {
+	for _, pin := range []string{"main", "v1.4.2"} {
+		root := settingsFixture(t)
+		if _, err := Enable(root, pin); err != nil {
+			t.Fatal(err)
+		}
+		write(t, root, ".seed/template.lock", "repo acme/open-seed\nversion main\n")
+		s, err := Report(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.Relation != RelationBroken || !s.Drifted {
+			t.Errorf("pin %q against a non-tag lock version: relation=%q drifted=%v, want unpinned/true (%s)",
+				pin, s.Relation, s.Drifted, s.Detail)
+		}
+	}
+}
+
+func TestVersionParsingRejectsSignedComponents(t *testing.T) {
+	for _, bad := range []string{"v+1.2.3", "v1.+2.3", "v-1.2.3", "v1.2.+3", "v 1.2.3", "v1.2.3 "} {
+		if _, ok := parseVersion(bad); ok {
+			t.Errorf("%q should not parse as a release tag", bad)
+		}
+	}
+	if _, ok := parseVersion("v1.2.3"); !ok {
+		t.Error("v1.2.3 should still parse")
+	}
+}

@@ -152,3 +152,20 @@ func TestCLIPluginCapabilityOnlyRefPassesCheck(t *testing.T) {
 		t.Fatalf("a floating ref must not fail the gate: %s", errS)
 	}
 }
+
+// An option must never be swallowed as the --ref value.
+func TestCLIPluginRefRejectsOptionLookingValues(t *testing.T) {
+	root := cliFixture(t)
+	writeF(t, root, ".seed/template.lock", "repo acme/open-seed\nversion v0.3.0\n")
+	for _, args := range [][]string{
+		{"plugin", "enable", "--ref", "--check"},
+		{"plugin", "enable", "--ref", "-v1.0.0"},
+	} {
+		if code, out, _ := seedRun(t, args...); code != exitUsage {
+			t.Errorf("%v: want usage exit, got %d %s", args, code, out)
+		}
+	}
+	if code, _, _ := seedRun(t, "plugin", "enable", "--ref", "v0.4.0"); code != 0 {
+		t.Error("a real ref should still be accepted")
+	}
+}

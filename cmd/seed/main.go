@@ -140,9 +140,12 @@ commands:
                                release or a branch: a capability-only update
   plugin disable               opt out of the Claude Code plugin channel
   plugin status [--check]      report both channels' release coordinates and
-                               how they stand (aligned/ahead/behind/floating);
-                               --check exits 1 only on a STALE pin, never on a
-                               deliberate capability-only ref (offline)
+                               how they stand: off, aligned, ahead, floating,
+                               behind, unpinned. --check exits 1 on behind (a
+                               stale pin) and unpinned (nothing usable to
+                               compare); off, aligned, ahead and floating all
+                               pass, so a deliberate capability-only ref never
+                               fails the gate (offline)
   skills lock                  resolve seed.yaml sources and pin seed.lock
   skills install [--frozen]    materialize pinned skills into skills/managed/
                                (--frozen refuses unlocked edits and drift — CI)
