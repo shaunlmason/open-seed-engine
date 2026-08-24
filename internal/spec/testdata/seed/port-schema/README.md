@@ -20,7 +20,7 @@ match; diverging here without a reviewed design-doc edit is a design violation.
 Decisions recorded here (consistent with the design doc, made concrete):
 
 - **Exit codes** follow research/10 §5.4 as amended by its erratum: `0` ok, `2`
-  claim not granted (contention, and, with a distinct `error` string,
+  claim not granted (contention; and, with a distinct `error` string,
   `rejected_author` lockout), `3` invalid transition, `4` not found, `5` backend
   unavailable, `6` fenced out (stale/missing claim token), `10` schema/protocol
   version mismatch. CLI usage errors are `64` and are not port results.

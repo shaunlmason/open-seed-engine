@@ -53,7 +53,7 @@ func fastService(t *testing.T, dir string) *Service {
 }
 
 // The suite's core lifecycle: create, promote, claim, fence, park, review,
-// reject-lockout, cascade: runs against the SQLite store through exactly
+// reject-lockout, cascade. It runs against the SQLite store through exactly
 // the same Service code paths as filecards.
 func TestFastcardsLifecycle(t *testing.T) {
 	sv := fastService(t, "")

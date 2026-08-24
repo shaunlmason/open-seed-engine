@@ -21,8 +21,8 @@ import (
 func slicesContains(s []string, v string) bool { return slices.Contains(s, v) }
 
 // StateExport is the migration document. Files are path-keyed verbatim, so
-// nothing the store holds: states, blocked_on edges, rejected authors,
-// evidence, comments, the run log: can be lost in translation.
+// nothing the store holds can be lost in translation: states, blocked_on
+// edges, rejected authors, evidence, comments, the run log.
 type StateExport struct {
 	SchemaVersion string            `json:"schema_version"`
 	Backend       string            `json:"backend"`
