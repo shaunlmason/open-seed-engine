@@ -346,3 +346,39 @@ func TestVersionParsing(t *testing.T) {
 		}
 	}
 }
+
+// A marketplace source has no `sha` field (only an individual plugin
+// source inside a marketplace does), so a commit SHA would never resolve.
+func TestCommitSHARefIsRefused(t *testing.T) {
+	root := settingsFixture(t)
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	if _, err := Enable(root, sha); err == nil {
+		t.Fatal("a commit SHA is not a usable marketplace ref and must be refused")
+	}
+	// A hand-edited settings file can still contain one: report it as
+	// broken rather than waving it through as a moving ref.
+	if _, err := Enable(root, "main"); err != nil {
+		t.Fatal(err)
+	}
+	m := readBack(t, root)
+	m["extraKnownMarketplaces"].(map[string]any)[MarketplaceName].(map[string]any)["source"].(map[string]any)["ref"] = sha
+	if err := writeSettings(root, m); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Report(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Relation != RelationBroken || !s.Drifted {
+		t.Errorf("a SHA pin should be reported as broken: relation=%q drifted=%v", s.Relation, s.Drifted)
+	}
+}
+
+// Short hex strings are plausible branch names; refusing them would be a
+// false positive.
+func TestShortHexRefIsNotTreatedAsASHA(t *testing.T) {
+	root := settingsFixture(t)
+	if _, err := Enable(root, "abc1234"); err != nil {
+		t.Fatalf("a short hex-looking branch name must be accepted: %v", err)
+	}
+}

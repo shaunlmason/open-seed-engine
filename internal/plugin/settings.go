@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -13,6 +14,11 @@ import (
 // folder is trusted. It is control surface (D4.1), so `enable`/`disable`
 // compose the edit and a human merges the reviewed diff.
 const SettingsPath = ".claude/settings.json"
+
+// commitSHA matches a full git object name. Short prefixes are not matched:
+// they are plausible branch names, and a false refusal is worse than the
+// report a moving ref already gets.
+var commitSHA = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 
 // QualifiedName is how the plugin is addressed in enabledPlugins.
 const QualifiedName = PluginName + "@" + MarketplaceName
@@ -109,6 +115,13 @@ func Enable(root, ref string) (*Status, error) {
 	}
 	if ref == "" {
 		ref = c.Version
+	}
+	// A marketplace source pins by branch or tag only: unlike an individual
+	// plugin source inside a marketplace, it has no `sha` field. A commit
+	// SHA here would not resolve at install time, so refuse it up front
+	// rather than writing a declaration that silently never loads.
+	if commitSHA.MatchString(ref) {
+		return nil, fmt.Errorf("--ref %s looks like a commit SHA, and a marketplace source pins by branch or tag only (no sha) — name a release tag or a branch", ref)
 	}
 	m, err := readSettings(root)
 	if err != nil {
@@ -239,10 +252,18 @@ func Report(root string) (*Status, error) {
 // BEHIND the template release is reported as drift, because that is the
 // accidental case: a template upgrade landed and the pin was never moved.
 func compare(pinned, template string) (Relation, string, bool) {
+	if commitSHA.MatchString(pinned) {
+		return RelationBroken, fmt.Sprintf("plugin channel pins %s, which is a commit SHA: a marketplace source pins by branch or tag only, so this declaration cannot resolve — re-run `seed plugin enable`", pinned), true
+	}
 	pv, pok := parseVersion(pinned)
 	tv, tok := parseVersion(template)
 	if !pok {
-		return RelationFloating, fmt.Sprintf("plugin channel tracks %q, a moving ref, while the template channel is at %s — capabilities advance on their own; nothing to reconcile",
+		// Offline, from a settings file alone, a branch and a non-semver
+		// tag are indistinguishable: git records no such marker. So this
+		// is reported, never asserted, and a pin that turns out to be an
+		// immutable tag is visible in `seed plugin status` for a human to
+		// judge. Resolving it properly needs the network (os-6eb32b94).
+		return RelationFloating, fmt.Sprintf("plugin channel tracks %q while the template channel is at %s — treated as a moving ref and not compared; if it is actually an immutable tag, it will never advance",
 			pinned, template), false
 	}
 	if !tok {
