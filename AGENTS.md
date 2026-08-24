@@ -42,9 +42,9 @@ half explains the first, a comma when it is an aside, or a full stop.
 
 Runtime string literals are the exception and keep their em-dashes: error
 messages, refusal text, help output, and usage strings are written for the
-operator reading them in a terminal, and are left alone. About seventy of
-them exist today, mostly in `internal/validate`, `internal/receipt`, and
-`internal/skills`.
+operator reading them in a terminal, and are left alone. Roughly seventy
+exist today, spread across the tree wherever a verb refuses or explains
+itself, rather than concentrated in any one package.
 
 **Paired dashes need rewording, not substitution.** A single dash maps
 cleanly onto a colon or comma. A matched *pair* bracketing an aside does
@@ -96,7 +96,12 @@ whole merged range even when the net change is a few lines.
 ## Releasing
 
 Releases are driven by the `VERSION` file: bump it and push to `main`, and
-the `release` workflow mints the tag at HEAD in-runner. Do not bump it as a
-side effect of unrelated work, and do not cut a release for changes that
-alter no behavior. `PROTOCOL` is a separate seam and moves only when the
-protocol version itself does.
+the `release` workflow mints the tag at HEAD in-runner (its push trigger is
+scoped to `paths: [VERSION]`). A `workflow_dispatch` with a `tag` input does
+the same thing manually, for a release that needs cutting without a file
+change. Either way the tag is minted in-runner, never pushed by hand, so the
+tag and the released commit cannot disagree.
+
+Do not bump `VERSION` as a side effect of unrelated work, and do not cut a
+release for changes that alter no behavior. `PROTOCOL` is a separate seam and
+moves only when the protocol version itself does.
