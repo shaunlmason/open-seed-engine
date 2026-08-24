@@ -7,10 +7,10 @@ how to change it.
 ## Build and test
 
 ```sh
-go build ./...
-go test ./...
 gofmt -l .        # must print nothing
 go vet ./...
+go build ./...
+go test ./...
 ```
 
 CI (`.github/workflows/ci.yml`) runs exactly those four on every pull request
@@ -65,14 +65,20 @@ that still outranks whatever punctuation the sentence already contains.
 To check a change before pushing:
 
 ```sh
-git grep -nE '^\s*//.*—' -- '*.go'
+git grep -nE '(//|/\*).*—' -- '*.go'
 git grep -l '—' -- '*.yaml' '*.yml' '*.json' '*.md' ':!AGENTS.md'
 ```
 
-Both should come back empty. This file is excluded from the second sweep
-because the table above quotes the dashes it is teaching you to remove; it
-is the only file in the tree allowed to contain them outside a runtime
-string.
+Both should come back empty. The first pattern is a heuristic, not a Go
+parser: it catches trailing and block comments as well as whole-line ones,
+but a string literal containing `//` can false-positive, and a dash inside a
+multi-line raw string can hide from it. When a hit is ambiguous, widen to
+`git grep -n '—' -- '*.go'`, which lists every dash in the package; each one
+should sit inside a runtime string literal.
+
+This file is excluded from the second sweep because the table above quotes
+the dashes it is teaching you to remove; it is the only file in the tree
+allowed to contain them outside a runtime string.
 
 ## Commits and pull requests
 
