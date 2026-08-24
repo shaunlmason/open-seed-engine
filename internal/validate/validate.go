@@ -189,7 +189,7 @@ func sharedScopeOwned(teams []Team, a, b string) bool {
 
 // Teams checks tier ≤ ceiling, a named human lead, unique priorities, and
 // non-overlapping scopes across squads (§6). Core's bare-`**` fallback is
-// exempt from pairwise overlap, it necessarily intersects every scope,
+// exempt from pairwise overlap (it necessarily intersects every scope),
 // but two squads both claiming the bare wildcard is a violation, and an
 // overlap of two specific scopes passes only under an owned shared_scope
 // entry.
