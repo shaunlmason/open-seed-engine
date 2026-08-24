@@ -24,7 +24,11 @@ priority: 1
 tier: L2
 `
 
+// Dual-format per D8: Claude Code subagent fields (name, description)
+// alongside sub-agents-skills' run-agent/permission.
 const roleA = `---
+name: reviewer
+description: Review a task PR against its approved plan.
 role: reviewer
 run-agent: claude
 ---
@@ -278,5 +282,49 @@ auto_merge_allowlist:
 	os.Remove(filepath.Join(root, ".seed/guardrails.yaml"))
 	if errs := Repo(root); len(errs) == 0 {
 		t.Fatal("missing guardrails accepted")
+	}
+}
+
+func TestRoleFrontmatterRequiresSubagentFields(t *testing.T) {
+	cases := []struct {
+		name    string
+		role    string
+		wantSub string
+	}{
+		{"missing name", strings.Replace(roleA, "name: reviewer\n", "", 1), "missing `name`"},
+		{"missing description", strings.Replace(roleA, "description: Review a task PR against its approved plan.\n", "", 1), "missing `description`"},
+		{"empty description", strings.Replace(roleA, "description: Review a task PR against its approved plan.", "description: \"\"", 1), "missing `description`"},
+		{"colon in name", strings.Replace(roleA, "name: reviewer", "name: rev:iewer", 1), "not a valid subagent identifier"},
+		{"leading hyphen", strings.Replace(roleA, "name: reviewer", "name: -reviewer", 1), "not a valid subagent identifier"},
+		{"uppercase", strings.Replace(roleA, "name: reviewer", "name: Reviewer", 1), "not a valid subagent identifier"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := setup(t)
+			full := filepath.Join(root, ".seed/agents/reviewer.md")
+			if err := os.WriteFile(full, []byte(tc.role), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			errs := RoleFrontmatter(root)
+			if !hasError(errs, tc.wantSub) {
+				t.Errorf("want an error containing %q, got %v", tc.wantSub, errs)
+			}
+		})
+	}
+}
+
+func TestRoleFrontmatterAcceptsDualFormat(t *testing.T) {
+	if errs := RoleFrontmatter(setup(t)); len(errs) != 0 {
+		t.Fatalf("dual-format roles should pass: %v", errs)
+	}
+}
+
+func TestRoleFrontmatterRejectsMissingBlock(t *testing.T) {
+	root := setup(t)
+	if err := os.WriteFile(filepath.Join(root, ".seed/agents/reviewer.md"), []byte("## Task\n\nNo frontmatter.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !hasError(RoleFrontmatter(root), "no YAML frontmatter") {
+		t.Error("a role without frontmatter should be rejected")
 	}
 }
