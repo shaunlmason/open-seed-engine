@@ -59,7 +59,7 @@ func TestCLIPluginChannel(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("stale pin should exit 1, got %d", code)
 	}
-	if !strings.Contains(errS, "drifted") {
+	if !strings.Contains(errS, "stale") {
 		t.Errorf("drift message unclear: %s", errS)
 	}
 	// Re-enabling re-pins to the current release.
@@ -105,6 +105,7 @@ func TestCLIPluginRejectsUnknownArguments(t *testing.T) {
 		{"plugin", "status", "--chek"},
 		{"plugin", "status", "extra"},
 		{"plugin", "enable", "--check"},
+		{"plugin", "enable", "--ref"},
 		{"plugin", "disable", "now"},
 	} {
 		if code, out, _ := seedRun(t, args...); code != exitUsage {
@@ -114,5 +115,40 @@ func TestCLIPluginRejectsUnknownArguments(t *testing.T) {
 	// The one accepted flag still works.
 	if code, _, _ := seedRun(t, "plugin", "status", "--check"); code != 0 {
 		t.Error("--check should still be accepted")
+	}
+}
+
+// A capability-only update must survive `make check`, which is where
+// validate.sh calls status --check.
+func TestCLIPluginCapabilityOnlyRefPassesCheck(t *testing.T) {
+	root := cliFixture(t)
+	writeF(t, root, ".seed/template.lock", "repo acme/open-seed\nversion v0.3.0\n")
+	if code, out, _ := seedRun(t, "plugin", "enable", "--ref", "v0.4.0"); code != 0 {
+		t.Fatalf("enable --ref: %d %s", code, out)
+	}
+	if code, out, errS := seedRun(t, "plugin", "status", "--check"); code != 0 {
+		t.Fatalf("a deliberate ahead pin must not fail the gate: %d %s %s", code, out, errS)
+	}
+	code, out, _ := seedRun(t, "plugin", "status")
+	if code != 0 {
+		t.Fatal(out)
+	}
+	var st struct {
+		Relation  string `json:"relation"`
+		PinnedRef string `json:"pinned_ref"`
+	}
+	if err := json.Unmarshal([]byte(out), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Relation != "ahead" || st.PinnedRef != "v0.4.0" {
+		t.Errorf("unexpected status: %+v", st)
+	}
+
+	// A branch is a moving ref: also reported, also not a failure.
+	if code, _, _ := seedRun(t, "plugin", "enable", "--ref", "main"); code != 0 {
+		t.Fatal("enable --ref main failed")
+	}
+	if code, _, errS := seedRun(t, "plugin", "status", "--check"); code != 0 {
+		t.Fatalf("a floating ref must not fail the gate: %s", errS)
 	}
 }
