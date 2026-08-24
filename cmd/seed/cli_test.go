@@ -88,7 +88,7 @@ protected_paths:
 auto_merge_allowlist: []
 `)
 	writeF(t, root, ".seed/teams/core.yaml", "name: core\nlead: alice\nscope: [\"**\"]\npriority: 1\ntier: L2\n")
-	writeF(t, root, ".seed/agents/reviewer.md", "---\nrole: reviewer\n---\n\n## Task\n\nReview.\n")
+	writeF(t, root, ".seed/agents/reviewer.md", "---\nname: reviewer\ndescription: Review a task PR.\nrole: reviewer\n---\n\n## Task\n\nReview.\n")
 	if err := os.MkdirAll(filepath.Join(root, "plans"), 0o755); err != nil {
 		t.Fatal(err)
 	}

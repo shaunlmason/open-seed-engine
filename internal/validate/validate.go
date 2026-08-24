@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -93,6 +94,7 @@ func Repo(root string) []error {
 	errs = append(errs, GuardrailsFile(root)...)
 	errs = append(errs, Teams(root)...)
 	errs = append(errs, RoleVariants(root)...)
+	errs = append(errs, RoleFrontmatter(root)...)
 	errs = append(errs, Plans(root)...)
 	return errs
 }
@@ -414,6 +416,78 @@ func roleBody(content string) string {
 		return content
 	}
 	return strings.TrimSpace(body)
+}
+
+// subagentName is Claude Code's identifier rule for a subagent: lowercase
+// letters, digits and hyphens, no leading hyphen, no colon.
+var subagentName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// RoleFrontmatter enforces D8's dual-format rule on .seed/agents/*.md: the
+// role files carry Claude Code subagent fields (name, description)
+// alongside sub-agents-skills' run-agent/permission, and are fanned out
+// unchanged. Claude Code SILENTLY SKIPS a subagent file missing name or
+// description (the parse error goes to the debug log, not the session), so
+// a role missing them is invisible in every fan-out and in the plugin
+// channel: nothing fails, the role simply never loads. Linting the source
+// is what makes the dual format hold.
+func RoleFrontmatter(root string) []error {
+	dir := filepath.Join(root, ".seed", "agents")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return []error{fmt.Errorf("roles: %w", err)}
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") && e.Name() != "README.md" {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	var errs []error
+	for _, n := range names {
+		b, err := os.ReadFile(filepath.Join(dir, n))
+		if err != nil {
+			return []error{err}
+		}
+		fm := map[string]any{}
+		raw := roleFrontmatter(string(b))
+		if raw == "" {
+			errs = append(errs, fmt.Errorf(".seed/agents/%s: no YAML frontmatter block", n))
+			continue
+		}
+		if err := yaml.Unmarshal([]byte(raw), &fm); err != nil {
+			errs = append(errs, fmt.Errorf(".seed/agents/%s: frontmatter is not valid YAML: %v", n, err))
+			continue
+		}
+		name, _ := fm["name"].(string)
+		desc, _ := fm["description"].(string)
+		if strings.TrimSpace(name) == "" {
+			errs = append(errs, fmt.Errorf(".seed/agents/%s: frontmatter is missing `name` — Claude Code silently skips a subagent without it (D8 dual-format)", n))
+		} else if !subagentName.MatchString(name) {
+			errs = append(errs, fmt.Errorf(".seed/agents/%s: `name: %s` is not a valid subagent identifier (lowercase letters, digits and hyphens; no leading hyphen, no colon)", n, name))
+		}
+		if strings.TrimSpace(desc) == "" {
+			errs = append(errs, fmt.Errorf(".seed/agents/%s: frontmatter is missing `description` — Claude Code silently skips a subagent without it (D8 dual-format)", n))
+		}
+	}
+	return errs
+}
+
+// roleFrontmatter returns the raw YAML between the leading `---` fences,
+// or "" when the file has no frontmatter block.
+func roleFrontmatter(content string) string {
+	rest, ok := strings.CutPrefix(content, "---\n")
+	if !ok {
+		return ""
+	}
+	fm, _, ok := strings.Cut(rest, "\n---\n")
+	if !ok {
+		return ""
+	}
+	return fm
 }
 
 // Plans lints every plan file in plans/ (README excluded).

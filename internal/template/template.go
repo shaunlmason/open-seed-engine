@@ -415,3 +415,20 @@ func mustHead(r *gitx.Repo) string {
 	sha, _ := r.Git("rev-parse", "HEAD")
 	return strings.TrimSpace(sha)
 }
+
+// Provenance exposes the shared release coordinates in .seed/template.lock
+// (repo and version) to other packages, so the plugin channel names the
+// same release as the template channel instead of parsing the lock twice.
+// A missing lock surfaces as an os.IsNotExist error for the caller to
+// treat as "this repo has no template provenance".
+func Provenance(root string) (repo, version string, err error) {
+	b, err := os.ReadFile(filepath.Join(root, lockPath))
+	if err != nil {
+		return "", "", err
+	}
+	l, rerr := parseLock(string(b))
+	if rerr != nil {
+		return "", "", rerr
+	}
+	return l.repo, l.version, nil
+}

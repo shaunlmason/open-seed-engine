@@ -1,6 +1,7 @@
 // Package sync generates the per-harness fan-outs from the source trees
 // (open-seed R1): .seed/agents/ → .claude/agents/, skills/ → .claude/skills/
-// and .agents/skills/, and rules/ fragments → the AGENTS.md managed block.
+// and .agents/skills/, rules/ fragments → the AGENTS.md managed block, and
+// the Claude Code plugin/marketplace channel (internal/plugin, §10 Q4).
 // Fan-out copies are byte-identical to their sources (role frontmatter must
 // stay first, so no injected headers: the README markers in each fan-out
 // dir carry the "do not edit here" warning). `--check` recomputes offline
@@ -14,6 +15,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/shaunlmason/open-seed-engine/internal/plugin"
 )
 
 const (
@@ -42,6 +45,14 @@ func Plan(root string) ([]Action, error) {
 		return nil, err
 	}
 	actions = append(actions, skillActions...)
+
+	pluginFiles, err := plugin.Files(root)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range pluginFiles {
+		actions = append(actions, Action{Path: f.Path, Content: f.Content})
+	}
 
 	agentsMD, err := renderAgentsMD(root)
 	if err != nil {
