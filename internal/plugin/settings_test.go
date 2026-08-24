@@ -219,3 +219,51 @@ func jsonEqual(a, b any) bool {
 	y, _ := json.Marshal(b)
 	return string(x) == string(y)
 }
+
+// Opting out must work in exactly the broken state that makes people want
+// out: provenance missing or malformed.
+func TestDisableSucceedsWithoutProvenance(t *testing.T) {
+	root := settingsFixture(t)
+	if _, err := Enable(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, ".seed/template.lock")); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Disable(root)
+	if err != nil {
+		t.Fatalf("disable must not need template.lock: %v", err)
+	}
+	if s.Enabled {
+		t.Error("channel still reported as enabled after disable")
+	}
+	m := readBack(t, root)
+	if _, ok := m["enabledPlugins"]; ok {
+		t.Error("disable did not remove the plugin entry")
+	}
+}
+
+func TestReportFlagsEnabledWithUnreadableProvenance(t *testing.T) {
+	root := settingsFixture(t)
+	if _, err := Enable(root); err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, ".seed/template.lock", "this is not a lock file\n")
+	s, err := Report(root)
+	if err != nil {
+		t.Fatalf("report must degrade, not fail: %v", err)
+	}
+	if !s.Drifted {
+		t.Error("an enabled channel with unreadable provenance cannot be verified and must be flagged")
+	}
+}
+
+// A settings file whose whole content is `null` unmarshals to a nil map;
+// writing into it would panic.
+func TestNullSettingsIsRefusedNotPanicked(t *testing.T) {
+	root := settingsFixture(t)
+	write(t, root, SettingsPath, "null\n")
+	if _, err := Enable(root); err == nil {
+		t.Fatal("`null` settings should be refused")
+	}
+}

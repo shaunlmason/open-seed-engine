@@ -42,6 +42,11 @@ func readSettings(root string) (map[string]any, error) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		return nil, fmt.Errorf("%s is not valid JSON: %w", SettingsPath, err)
 	}
+	// A file whose entire content is the literal `null` unmarshals without
+	// error and leaves the map nil, which would panic on the first write.
+	if m == nil {
+		return nil, fmt.Errorf("%s is `null`, not a JSON object — repair it before enabling the plugin channel", SettingsPath)
+	}
 	return m, nil
 }
 
@@ -112,7 +117,9 @@ func Enable(root string) (*Status, error) {
 
 // Disable removes exactly the two entries Enable added, dropping the
 // containing objects when they empty and leaving every other setting
-// untouched.
+// untouched. It deliberately does not consult .seed/template.lock: opting
+// out must succeed even when the provenance that Enable needed is missing
+// or malformed.
 func Disable(root string) (*Status, error) {
 	m, err := readSettings(root)
 	if err != nil {
@@ -140,12 +147,18 @@ func Disable(root string) (*Status, error) {
 // enabled, the ref it pins must name the same release as
 // .seed/template.lock. Disagreement means the two distribution paths have
 // come apart, which is exactly the R8 failure the channel exists to soften.
+//
+// Missing or unreadable provenance is reported, never returned as an error.
+// Enable must refuse without coordinates (it cannot invent them), but
+// reporting and opting OUT have to keep working in exactly that broken
+// state, or a repo with a damaged template.lock has no way back off the
+// channel.
 func Report(root string) (*Status, error) {
-	c, err := Load(root)
-	if err != nil {
-		return nil, err
+	s := &Status{}
+	c, provErr := Load(root)
+	if provErr == nil {
+		s.TemplateRepo, s.TemplateVersion = c.Repo, c.Version
 	}
-	s := &Status{TemplateRepo: c.Repo, TemplateVersion: c.Version}
 
 	m, err := readSettings(root)
 	if err != nil {
@@ -170,6 +183,10 @@ func Report(root string) (*Status, error) {
 	switch {
 	case !s.Enabled:
 		s.Detail = "plugin channel not enabled (template channel only) — nothing to check"
+	case provErr != nil:
+		s.Drifted = true
+		s.Detail = fmt.Sprintf("%s is enabled but .seed/template.lock could not be read (%v), so the two channels cannot be compared — repair the lock, or run `seed plugin disable`",
+			QualifiedName, provErr)
 	case s.PinnedRef == "":
 		s.Drifted = true
 		s.Detail = fmt.Sprintf("%s is enabled but no %s marketplace is declared in %s — run `seed plugin enable`",

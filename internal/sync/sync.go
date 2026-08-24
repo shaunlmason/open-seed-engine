@@ -221,6 +221,84 @@ func ruleFragments(root string) (string, error) {
 	return strings.Join(parts, "\n\n") + "\n", nil
 }
 
+// stale lists files under the plugin channel's owned roots that the current
+// render does not claim. Without this, deleting a role or a skill (or the
+// template.lock the channel is keyed to) leaves the old file on disk and
+// --check still passes, so a removed capability keeps shipping. Only roots
+// the channel owns outright are swept: every file under them is generated,
+// including the "do not edit" marker.
+func stale(root string, actions []Action) ([]string, error) {
+	want := make(map[string]bool, len(actions))
+	for _, a := range actions {
+		want[filepath.Clean(a.Path)] = true
+	}
+	var found []string
+	for _, owned := range plugin.OwnedRoots {
+		base := filepath.Join(root, owned)
+		err := filepath.WalkDir(base, func(p string, d os.DirEntry, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) {
+					return nil
+				}
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+			rel, err := filepath.Rel(root, p)
+			if err != nil {
+				return err
+			}
+			if !want[filepath.Clean(rel)] {
+				found = append(found, rel)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	sort.Strings(found)
+	return found, nil
+}
+
+// pruneEmptyDirs removes directories left behind under the owned roots
+// after their last generated file goes, so a dropped channel leaves no
+// husk. The roots themselves are removed when they empty.
+func pruneEmptyDirs(root string) error {
+	for _, owned := range plugin.OwnedRoots {
+		base := filepath.Join(root, owned)
+		var dirs []string
+		err := filepath.WalkDir(base, func(p string, d os.DirEntry, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) {
+					return nil
+				}
+				return err
+			}
+			if d.IsDir() {
+				dirs = append(dirs, p)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		// Deepest first, so a directory empties before it is considered.
+		sort.Sort(sort.Reverse(sort.StringSlice(dirs)))
+		for _, d := range dirs {
+			entries, err := os.ReadDir(d)
+			if err != nil || len(entries) > 0 {
+				continue
+			}
+			if err := os.Remove(d); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // Apply writes every generated file.
 func Apply(root string) (int, error) {
 	actions, err := Plan(root)
@@ -228,6 +306,16 @@ func Apply(root string) (int, error) {
 		return 0, err
 	}
 	written := 0
+	dead, err := stale(root, actions)
+	if err != nil {
+		return 0, err
+	}
+	for _, rel := range dead {
+		if err := os.Remove(filepath.Join(root, rel)); err != nil && !os.IsNotExist(err) {
+			return written, err
+		}
+		written++
+	}
 	for _, a := range actions {
 		full := filepath.Join(root, a.Path)
 		existing, err := os.ReadFile(full)
@@ -241,6 +329,9 @@ func Apply(root string) (int, error) {
 			return written, err
 		}
 		written++
+	}
+	if err := pruneEmptyDirs(root); err != nil {
+		return written, err
 	}
 	return written, nil
 }
@@ -261,6 +352,13 @@ func Check(root string) []error {
 		if string(existing) != a.Content {
 			errs = append(errs, fmt.Errorf("%s: drifted from its source (run seed sync; edit the source tree, never the fan-out — R1)", a.Path))
 		}
+	}
+	dead, err := stale(root, actions)
+	if err != nil {
+		return append(errs, err)
+	}
+	for _, rel := range dead {
+		errs = append(errs, fmt.Errorf("%s: no source produces this file any more (run seed sync; a deleted capability must stop shipping)", rel))
 	}
 	return errs
 }

@@ -48,6 +48,14 @@ func runPlugin(args []string, stdout, stderr *os.File) int {
 		return 1
 	}
 
+	// Unknown or extra arguments are a usage error, never a silent no-op:
+	// `seed plugin status --chek` must not pass as a clean drift check in
+	// somebody's CI.
+	if len(args) > 1 && !(args[0] == "status" && len(args) == 2 && args[1] == "--check") {
+		fmt.Fprintf(stderr, "seed plugin %s: unexpected argument %q\n", args[0], args[1])
+		return exitUsage
+	}
+
 	switch args[0] {
 	case "enable":
 		s, err := plugin.Enable(root)
@@ -67,7 +75,7 @@ func runPlugin(args []string, stdout, stderr *os.File) int {
 			"review and commit the " + plugin.SettingsPath + " diff",
 		})
 	case "status":
-		check := len(args) > 1 && args[1] == "--check"
+		check := len(args) == 2
 		s, err := plugin.Report(root)
 		if err != nil {
 			return fail("plugin-status", err)

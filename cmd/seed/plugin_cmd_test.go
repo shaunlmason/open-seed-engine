@@ -96,3 +96,23 @@ func TestCLIPluginWithoutTemplateLock(t *testing.T) {
 		t.Fatalf("want a refusal envelope, got %d %s", code, out)
 	}
 }
+
+// A typo must not pass as a clean drift check in somebody's CI.
+func TestCLIPluginRejectsUnknownArguments(t *testing.T) {
+	root := cliFixture(t)
+	writeF(t, root, ".seed/template.lock", "repo acme/open-seed\nversion v0.3.0\n")
+	for _, args := range [][]string{
+		{"plugin", "status", "--chek"},
+		{"plugin", "status", "extra"},
+		{"plugin", "enable", "--check"},
+		{"plugin", "disable", "now"},
+	} {
+		if code, out, _ := seedRun(t, args...); code != exitUsage {
+			t.Errorf("%v: want usage exit, got %d %s", args, code, out)
+		}
+	}
+	// The one accepted flag still works.
+	if code, _, _ := seedRun(t, "plugin", "status", "--check"); code != 0 {
+		t.Error("--check should still be accepted")
+	}
+}

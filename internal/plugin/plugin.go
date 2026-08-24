@@ -48,7 +48,28 @@ const (
 
 	description   = "open-seed's evolving capabilities: agent skills and role definitions, distributed as a plugin so an instantiated repo can take capability updates without a template merge (R8)."
 	marketplaceOf = "open-seed's own capability channel: the plugin half of the two distribution paths, alongside the template repo itself."
+
+	readme = `# Generated fan-out: do not edit here
+
+The Claude Code plugin package (design §10 Q4, R8), rendered by ` + "`seed sync`" + ` from
+` + "`skills/`" + ` and ` + "`.seed/agents/`" + `. Edit those sources; ` + "`seed sync --check`" + ` fails
+CI on drift (R1), and sync deletes anything here that its sources no longer
+produce. The catalog that publishes this package is
+` + "`../.claude-plugin/marketplace.json`" + `, also generated.
+
+` + "`skills/managed/`" + ` is deliberately excluded: those are third-party skills
+pinned by this repo's own ` + "`seed.yaml`" + `/` + "`seed.lock`" + `, and republishing them
+under open-seed's manifest would misattribute provenance.
+`
 )
+
+// OwnedRoots are the directories this channel owns OUTRIGHT: every file
+// under them is generated, so sync may delete anything it did not render.
+// Nothing here is hand-written (the "do not edit" marker is rendered too),
+// which is what makes wholesale pruning safe: a role or skill deleted at
+// the source must stop shipping, and a repo that loses its template
+// provenance must stop publishing a channel altogether.
+var OwnedRoots = []string{Dir, ".claude-plugin"}
 
 // File is one rendered file: a repo-relative path and its exact content.
 // sync converts these into its own action type; plugin deliberately does
@@ -162,6 +183,8 @@ func Files(root string) ([]File, error) {
 		return nil, err
 	}
 	files = append(files, File{Path: MarketplacePath, Content: string(b) + "\n"})
+
+	files = append(files, File{Path: Dir + "/README.md", Content: readme})
 
 	skillFiles, err := skillPayload(root)
 	if err != nil {

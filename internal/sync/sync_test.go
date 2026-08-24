@@ -362,3 +362,80 @@ func TestNoTemplateLockLeavesTheChannelUnbuilt(t *testing.T) {
 		t.Fatalf("post-sync drift: %v", errs)
 	}
 }
+
+// A capability deleted at the source must stop shipping: the generated
+// copy is removed, and until sync runs, --check reports it. Without this a
+// removed skill keeps being published and --check stays clean.
+func TestDeletedSourceStopsShipping(t *testing.T) {
+	root := setup(t)
+	writeAt := func(p, c string) {
+		full := filepath.Join(root, p)
+		os.MkdirAll(filepath.Dir(full), 0o755)
+		if err := os.WriteFile(full, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeAt(".seed/template.lock", "repo acme/open-seed\nversion v0.2.0\n")
+	writeAt("skills/doomed/SKILL.md", "# doomed\n")
+	if _, err := Apply(root); err != nil {
+		t.Fatal(err)
+	}
+	shipped := filepath.Join(root, "plugin/skills/doomed/SKILL.md")
+	if _, err := os.Stat(shipped); err != nil {
+		t.Fatalf("skill was not published: %v", err)
+	}
+
+	if err := os.RemoveAll(filepath.Join(root, "skills/doomed")); err != nil {
+		t.Fatal(err)
+	}
+	errs := Check(root)
+	if len(errs) == 0 {
+		t.Fatal("a generated file with no source must be reported as drift")
+	}
+	if !strings.Contains(errs[0].Error(), "doomed") {
+		t.Errorf("drift not attributed to the orphan: %v", errs)
+	}
+	if _, err := Apply(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(shipped); !os.IsNotExist(err) {
+		t.Error("sync did not remove the orphaned file")
+	}
+	if _, err := os.Stat(filepath.Join(root, "plugin/skills/doomed")); !os.IsNotExist(err) {
+		t.Error("sync left an empty directory behind")
+	}
+	if errs := Check(root); len(errs) != 0 {
+		t.Fatalf("post-sync drift: %v", errs)
+	}
+}
+
+// Losing template provenance drops the whole channel rather than leaving a
+// stale one published.
+func TestRemovingTemplateLockRetiresTheChannel(t *testing.T) {
+	root := setup(t)
+	lock := filepath.Join(root, ".seed/template.lock")
+	os.MkdirAll(filepath.Dir(lock), 0o755)
+	if err := os.WriteFile(lock, []byte("repo acme/open-seed\nversion v0.2.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Apply(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(lock); err != nil {
+		t.Fatal(err)
+	}
+	if errs := Check(root); len(errs) == 0 {
+		t.Fatal("an orphaned channel must be reported")
+	}
+	if _, err := Apply(root); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"plugin", ".claude-plugin"} {
+		if _, err := os.Stat(filepath.Join(root, p)); !os.IsNotExist(err) {
+			t.Errorf("%s survived the loss of template provenance", p)
+		}
+	}
+	if errs := Check(root); len(errs) != 0 {
+		t.Fatalf("post-sync drift: %v", errs)
+	}
+}
