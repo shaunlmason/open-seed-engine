@@ -41,7 +41,7 @@ func readBack(t *testing.T, root string) map[string]any {
 // Code would ignore.
 func TestEnableWritesTheDoubledSourceNesting(t *testing.T) {
 	root := settingsFixture(t)
-	if _, err := Enable(root); err != nil {
+	if _, err := Enable(root, ""); err != nil {
 		t.Fatal(err)
 	}
 	m := readBack(t, root)
@@ -75,7 +75,7 @@ func TestEnableWritesTheDoubledSourceNesting(t *testing.T) {
 
 func TestEnablePreservesUnrelatedSettingsAndIsIdempotent(t *testing.T) {
 	root := settingsFixture(t)
-	if _, err := Enable(root); err != nil {
+	if _, err := Enable(root, ""); err != nil {
 		t.Fatal(err)
 	}
 	first, err := os.ReadFile(filepath.Join(root, SettingsPath))
@@ -85,7 +85,7 @@ func TestEnablePreservesUnrelatedSettingsAndIsIdempotent(t *testing.T) {
 	if _, ok := readBack(t, root)["permissions"]; !ok {
 		t.Error("enable dropped the permissions block")
 	}
-	if _, err := Enable(root); err != nil {
+	if _, err := Enable(root, ""); err != nil {
 		t.Fatal(err)
 	}
 	second, _ := os.ReadFile(filepath.Join(root, SettingsPath))
@@ -100,7 +100,7 @@ func TestDisableRemovesOnlyWhatEnableAdded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Enable(root); err != nil {
+	if _, err := Enable(root, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Disable(root); err != nil {
@@ -127,7 +127,7 @@ func TestDisableRemovesOnlyWhatEnableAdded(t *testing.T) {
 
 func TestDisableKeepsOtherMarketplacesAndPlugins(t *testing.T) {
 	root := settingsFixture(t)
-	if _, err := Enable(root); err != nil {
+	if _, err := Enable(root, ""); err != nil {
 		t.Fatal(err)
 	}
 	m := readBack(t, root)
@@ -165,7 +165,7 @@ func TestReportOffWhenNotEnabled(t *testing.T) {
 
 func TestReportDetectsCrossChannelDrift(t *testing.T) {
 	root := settingsFixture(t)
-	if _, err := Enable(root); err != nil {
+	if _, err := Enable(root, ""); err != nil {
 		t.Fatal(err)
 	}
 	s, err := Report(root)
@@ -224,7 +224,7 @@ func jsonEqual(a, b any) bool {
 // out: provenance missing or malformed.
 func TestDisableSucceedsWithoutProvenance(t *testing.T) {
 	root := settingsFixture(t)
-	if _, err := Enable(root); err != nil {
+	if _, err := Enable(root, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(root, ".seed/template.lock")); err != nil {
@@ -245,7 +245,7 @@ func TestDisableSucceedsWithoutProvenance(t *testing.T) {
 
 func TestReportFlagsEnabledWithUnreadableProvenance(t *testing.T) {
 	root := settingsFixture(t)
-	if _, err := Enable(root); err != nil {
+	if _, err := Enable(root, ""); err != nil {
 		t.Fatal(err)
 	}
 	write(t, root, ".seed/template.lock", "this is not a lock file\n")
@@ -263,7 +263,154 @@ func TestReportFlagsEnabledWithUnreadableProvenance(t *testing.T) {
 func TestNullSettingsIsRefusedNotPanicked(t *testing.T) {
 	root := settingsFixture(t)
 	write(t, root, SettingsPath, "null\n")
-	if _, err := Enable(root); err == nil {
+	if _, err := Enable(root, ""); err == nil {
 		t.Fatal("`null` settings should be refused")
+	}
+}
+
+// The channel exists so capabilities can advance ahead of the structural
+// template. This check runs inside `make check`, so a deliberate
+// capability-only pin must be REPORTED, never refused: refusing it would
+// forbid the operation the channel is for.
+func TestAheadAndFloatingRefsAreNotFailures(t *testing.T) {
+	cases := []struct {
+		name     string
+		ref      string
+		relation Relation
+	}{
+		{"later release", "v2.0.0", RelationAhead},
+		{"later patch", "v1.4.3", RelationAhead},
+		{"branch", "main", RelationFloating},
+		{"channel branch", "release/stable", RelationFloating},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := settingsFixture(t) // template.lock is v1.4.2
+			if _, err := Enable(root, tc.ref); err != nil {
+				t.Fatal(err)
+			}
+			s, err := Report(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s.Relation != tc.relation {
+				t.Errorf("relation = %q, want %q (%s)", s.Relation, tc.relation, s.Detail)
+			}
+			if s.Drifted {
+				t.Errorf("a deliberate %s pin must not be reported as drift: %s", tc.relation, s.Detail)
+			}
+			if s.PinnedRef != tc.ref {
+				t.Errorf("pinned_ref = %q, want %q", s.PinnedRef, tc.ref)
+			}
+		})
+	}
+}
+
+// The accidental case still fails: a template upgrade landed and nobody
+// moved the pin.
+func TestStalePinIsStillDrift(t *testing.T) {
+	root := settingsFixture(t)
+	if _, err := Enable(root, ""); err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, ".seed/template.lock", "repo acme/open-seed\nversion v1.5.0\n")
+	s, err := Report(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Relation != RelationBehind || !s.Drifted {
+		t.Errorf("a pin left behind a template upgrade must be drift: relation=%q drifted=%v", s.Relation, s.Drifted)
+	}
+}
+
+func TestEnableDefaultsToTheTemplateRelease(t *testing.T) {
+	root := settingsFixture(t)
+	s, err := Enable(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.PinnedRef != "v1.4.2" || s.Relation != RelationAligned {
+		t.Errorf("default enable should align with template.lock: %+v", s)
+	}
+}
+
+func TestVersionParsing(t *testing.T) {
+	for _, ok := range []string{"v0.0.0", "v1.2.3", "v10.20.30"} {
+		if _, good := parseVersion(ok); !good {
+			t.Errorf("%q should parse as a release tag", ok)
+		}
+	}
+	for _, bad := range []string{"main", "1.2.3", "v1.2", "v1.2.3.4", "v1.2.x", "vx.y.z", "", "release/stable"} {
+		if _, good := parseVersion(bad); good {
+			t.Errorf("%q should NOT parse as a release tag", bad)
+		}
+	}
+}
+
+// A marketplace source has no `sha` field (only an individual plugin
+// source inside a marketplace does), so a commit SHA would never resolve.
+func TestCommitSHARefIsRefused(t *testing.T) {
+	root := settingsFixture(t)
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	if _, err := Enable(root, sha); err == nil {
+		t.Fatal("a commit SHA is not a usable marketplace ref and must be refused")
+	}
+	// A hand-edited settings file can still contain one: report it as
+	// broken rather than waving it through as a moving ref.
+	if _, err := Enable(root, "main"); err != nil {
+		t.Fatal(err)
+	}
+	m := readBack(t, root)
+	m["extraKnownMarketplaces"].(map[string]any)[MarketplaceName].(map[string]any)["source"].(map[string]any)["ref"] = sha
+	if err := writeSettings(root, m); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Report(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Relation != RelationBroken || !s.Drifted {
+		t.Errorf("a SHA pin should be reported as broken: relation=%q drifted=%v", s.Relation, s.Drifted)
+	}
+}
+
+// Short hex strings are plausible branch names; refusing them would be a
+// false positive.
+func TestShortHexRefIsNotTreatedAsASHA(t *testing.T) {
+	root := settingsFixture(t)
+	if _, err := Enable(root, "abc1234"); err != nil {
+		t.Fatalf("a short hex-looking branch name must be accepted: %v", err)
+	}
+}
+
+// A lock version that is not a release tag must be caught even when the
+// pin happens to be the same string: string equality must not stand in
+// for "aligned".
+func TestBogusTemplateVersionIsNeverAligned(t *testing.T) {
+	for _, pin := range []string{"main", "v1.4.2"} {
+		root := settingsFixture(t)
+		if _, err := Enable(root, pin); err != nil {
+			t.Fatal(err)
+		}
+		write(t, root, ".seed/template.lock", "repo acme/open-seed\nversion main\n")
+		s, err := Report(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.Relation != RelationBroken || !s.Drifted {
+			t.Errorf("pin %q against a non-tag lock version: relation=%q drifted=%v, want unpinned/true (%s)",
+				pin, s.Relation, s.Drifted, s.Detail)
+		}
+	}
+}
+
+func TestVersionParsingRejectsSignedComponents(t *testing.T) {
+	for _, bad := range []string{"v+1.2.3", "v1.+2.3", "v-1.2.3", "v1.2.+3", "v 1.2.3", "v1.2.3 "} {
+		if _, ok := parseVersion(bad); ok {
+			t.Errorf("%q should not parse as a release tag", bad)
+		}
+	}
+	if _, ok := parseVersion("v1.2.3"); !ok {
+		t.Error("v1.2.3 should still parse")
 	}
 }

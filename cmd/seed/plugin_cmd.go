@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/shaunlmason/open-seed-engine/internal/config"
 	"github.com/shaunlmason/open-seed-engine/internal/plugin"
@@ -20,7 +21,7 @@ import (
 // one drift-detection story with every other fan-out.
 func runPlugin(args []string, stdout, stderr *os.File) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "seed: usage: seed plugin enable | seed plugin disable | seed plugin status [--check]")
+		fmt.Fprintln(stderr, "seed: usage: seed plugin enable [--ref <tag|branch>] | seed plugin disable | seed plugin status [--check]")
 		return exitUsage
 	}
 	cwd, err := os.Getwd()
@@ -37,7 +38,8 @@ func runPlugin(args []string, stdout, stderr *os.File) int {
 		b, _ := json.Marshal(map[string]any{"ok": true, "schema_version": "1.0", "verb": verb,
 			"enabled": s.Enabled, "pinned_ref": s.PinnedRef, "pinned_repo": s.PinnedRepo,
 			"template_repo": s.TemplateRepo, "template_version": s.TemplateVersion,
-			"drifted": s.Drifted, "detail": s.Detail, "next_steps": next})
+			"relation": string(s.Relation),
+			"drifted":  s.Drifted, "detail": s.Detail, "next_steps": next})
 		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
@@ -51,14 +53,26 @@ func runPlugin(args []string, stdout, stderr *os.File) int {
 	// Unknown or extra arguments are a usage error, never a silent no-op:
 	// `seed plugin status --chek` must not pass as a clean drift check in
 	// somebody's CI.
-	if len(args) > 1 && !(args[0] == "status" && len(args) == 2 && args[1] == "--check") {
+	ref := ""
+	switch {
+	case args[0] == "status" && len(args) == 2 && args[1] == "--check":
+	case args[0] == "enable" && len(args) == 3 && args[1] == "--ref":
+		// A missing value would otherwise let the NEXT option become the
+		// ref: `enable --ref --check` would write "--check" and report it
+		// as a moving ref rather than refusing.
+		if args[2] == "" || strings.HasPrefix(args[2], "-") {
+			fmt.Fprintf(stderr, "seed plugin enable: --ref needs a tag or branch name, got %q\n", args[2])
+			return exitUsage
+		}
+		ref = args[2]
+	case len(args) > 1:
 		fmt.Fprintf(stderr, "seed plugin %s: unexpected argument %q\n", args[0], args[1])
 		return exitUsage
 	}
 
 	switch args[0] {
 	case "enable":
-		s, err := plugin.Enable(root)
+		s, err := plugin.Enable(root, ref)
 		if err != nil {
 			return fail("plugin-enable", err)
 		}

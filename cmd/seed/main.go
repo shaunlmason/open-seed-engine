@@ -133,13 +133,19 @@ commands:
                                execute a workflow in parallel waves; --mock is
                                zero-credential AND zero-side-effect; run state
                                under <git-common-dir>/seed-runs/<run-id>/
-  plugin enable|disable        opt this repo into (or out of) the Claude Code
-                               plugin channel by composing the project-scope
-                               settings declaration (§10 Q4; control surface,
-                               so the edit lands via a reviewed PR)
-  plugin status [--check]      report both channels' release coordinates;
-                               --check exits 1 when the pinned marketplace ref
-                               disagrees with .seed/template.lock (offline)
+  plugin enable [--ref R]      opt this repo into the Claude Code plugin channel
+                               by composing the project-scope settings
+                               declaration (§10 Q4; control surface, so the edit
+                               lands via a reviewed PR). --ref tracks a later
+                               release or a branch: a capability-only update
+  plugin disable               opt out of the Claude Code plugin channel
+  plugin status [--check]      report both channels' release coordinates and
+                               how they stand: off, aligned, ahead, floating,
+                               behind, unpinned. --check exits 1 on behind (a
+                               stale pin) and unpinned (nothing usable to
+                               compare); off, aligned, ahead and floating all
+                               pass, so a deliberate capability-only ref never
+                               fails the gate (offline)
   skills lock                  resolve seed.yaml sources and pin seed.lock
   skills install [--frozen]    materialize pinned skills into skills/managed/
                                (--frozen refuses unlocked edits and drift — CI)

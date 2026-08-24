@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 )
 
 // SettingsPath is the project-scope settings file Claude Code reads once a
@@ -12,18 +15,41 @@ import (
 // compose the edit and a human merges the reviewed diff.
 const SettingsPath = ".claude/settings.json"
 
+// commitSHA matches a full git object name. Short prefixes are not matched:
+// they are plausible branch names, and a false refusal is worse than the
+// report a moving ref already gets.
+var commitSHA = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+
 // QualifiedName is how the plugin is addressed in enabledPlugins.
 const QualifiedName = PluginName + "@" + MarketplaceName
 
+// Relation describes how the plugin channel's pin stands to the template
+// channel's release. Two of these fail `status --check`: `behind` (a stale
+// pin a template upgrade left behind) and `unpinned` (nothing usable to
+// compare). The rest pass, because `aligned`, `ahead` and `floating` are
+// each either agreement or a deliberate choice the operator made, and a
+// check wired into `make check` must not forbid a deliberate choice.
+type Relation string
+
+const (
+	RelationOff      Relation = "off"      // channel not enabled
+	RelationAligned  Relation = "aligned"  // pin names the template release
+	RelationAhead    Relation = "ahead"    // pin names a LATER release: capability-only update
+	RelationBehind   Relation = "behind"   // pin names an EARLIER release: a stale pin
+	RelationFloating Relation = "floating" // pin is a branch or other moving ref: tracks upstream
+	RelationBroken   Relation = "unpinned" // enabled but nothing usable to compare
+)
+
 // Status is the offline view of the channel, from checked-in files only.
 type Status struct {
-	Enabled         bool   `json:"enabled"`
-	PinnedRef       string `json:"pinned_ref,omitempty"`
-	PinnedRepo      string `json:"pinned_repo,omitempty"`
-	TemplateRepo    string `json:"template_repo"`
-	TemplateVersion string `json:"template_version"`
-	Drifted         bool   `json:"drifted"`
-	Detail          string `json:"detail"`
+	Enabled         bool     `json:"enabled"`
+	PinnedRef       string   `json:"pinned_ref,omitempty"`
+	PinnedRepo      string   `json:"pinned_repo,omitempty"`
+	TemplateRepo    string   `json:"template_repo"`
+	TemplateVersion string   `json:"template_version"`
+	Relation        Relation `json:"relation"`
+	Drifted         bool     `json:"drifted"`
+	Detail          string   `json:"detail"`
 }
 
 func settingsFile(root string) string { return filepath.Join(root, SettingsPath) }
@@ -80,10 +106,24 @@ func objAt(m map[string]any, key string) map[string]any {
 // is itself an object carrying its own `source` discriminator ("github",
 // "directory", "url", ...). Flattening it produces a declaration Claude
 // Code ignores.
-func Enable(root string) (*Status, error) {
+// ref selects what the marketplace tracks: "" means the template release
+// in .seed/template.lock (the aligned default). Passing a later tag or a
+// branch is how a repo takes capability updates ahead of its structural
+// template, which `status --check` reports rather than refuses.
+func Enable(root, ref string) (*Status, error) {
 	c, err := Load(root)
 	if err != nil {
 		return nil, err
+	}
+	if ref == "" {
+		ref = c.Version
+	}
+	// A marketplace source pins by branch or tag only: unlike an individual
+	// plugin source inside a marketplace, it has no `sha` field. A commit
+	// SHA here would not resolve at install time, so refuse it up front
+	// rather than writing a declaration that silently never loads.
+	if commitSHA.MatchString(ref) {
+		return nil, fmt.Errorf("--ref %s looks like a commit SHA, and a marketplace source pins by branch or tag only (no sha) — name a release tag or a branch", ref)
 	}
 	m, err := readSettings(root)
 	if err != nil {
@@ -97,7 +137,7 @@ func Enable(root string) (*Status, error) {
 		"source": map[string]any{
 			"source": "github",
 			"repo":   c.Repo,
-			"ref":    c.Version,
+			"ref":    ref,
 		},
 	}
 	m["extraKnownMarketplaces"] = markets
@@ -182,24 +222,100 @@ func Report(root string) (*Status, error) {
 
 	switch {
 	case !s.Enabled:
+		s.Relation = RelationOff
 		s.Detail = "plugin channel not enabled (template channel only) — nothing to check"
 	case provErr != nil:
-		s.Drifted = true
+		s.Relation, s.Drifted = RelationBroken, true
 		s.Detail = fmt.Sprintf("%s is enabled but .seed/template.lock could not be read (%v), so the two channels cannot be compared — repair the lock, or run `seed plugin disable`",
 			QualifiedName, provErr)
 	case s.PinnedRef == "":
-		s.Drifted = true
+		s.Relation, s.Drifted = RelationBroken, true
 		s.Detail = fmt.Sprintf("%s is enabled but no %s marketplace is declared in %s — run `seed plugin enable`",
 			QualifiedName, MarketplaceName, SettingsPath)
 	case s.PinnedRepo != c.Repo:
-		s.Drifted = true
+		s.Relation, s.Drifted = RelationBroken, true
 		s.Detail = fmt.Sprintf("marketplace repo %q disagrees with .seed/template.lock repo %q", s.PinnedRepo, c.Repo)
-	case s.PinnedRef != c.Version:
-		s.Drifted = true
-		s.Detail = fmt.Sprintf("plugin channel pins %s but the template channel is at %s — the two distribution paths have drifted; run `seed plugin enable` after upgrading, or `seed template upgrade` first",
-			s.PinnedRef, c.Version)
 	default:
-		s.Detail = fmt.Sprintf("both channels at %s (%s)", c.Version, c.Repo)
+		s.Relation, s.Detail, s.Drifted = compare(s.PinnedRef, c.Version, c.Repo)
 	}
 	return s, nil
+}
+
+// compare classifies a pin that is not identical to the template release.
+//
+// A capability-only update is a legitimate operation: pointing the
+// marketplace at a LATER release, or at a moving ref such as a branch, is
+// how the plugin channel advances ahead of the structural template. This
+// check runs inside `make check`, so treating either as a failure would
+// forbid the very thing the channel exists to allow. Only a pin left
+// BEHIND the template release is reported as drift, because that is the
+// accidental case: a template upgrade landed and the pin was never moved.
+func compare(pinned, template, repo string) (Relation, string, bool) {
+	// The template tag is validated FIRST. Deciding "aligned" by string
+	// equality before this would let a lock version that is not a release
+	// tag at all (say `main`) pass as agreement with a pin of the same
+	// text, skipping the broken-state branch entirely.
+	tv, tok := parseVersion(template)
+	if !tok {
+		return RelationBroken, fmt.Sprintf(".seed/template.lock version %q is not a vX.Y.Z release tag, so the two channels cannot be compared — repair the lock", template), true
+	}
+	if commitSHA.MatchString(pinned) {
+		return RelationBroken, fmt.Sprintf("plugin channel pins %s, which is a commit SHA: a marketplace source pins by branch or tag only, so this declaration cannot resolve — re-run `seed plugin enable`", pinned), true
+	}
+	pv, pok := parseVersion(pinned)
+	if !pok {
+		// Offline, from a settings file alone, a branch and a non-semver
+		// tag are indistinguishable: git records no such marker. So this
+		// is reported, never asserted, and a pin that turns out to be an
+		// immutable tag is visible in `seed plugin status` for a human to
+		// judge. Resolving it properly needs the network (os-6eb32b94).
+		return RelationFloating, fmt.Sprintf("plugin channel tracks %q while the template channel is at %s — treated as a moving ref and not compared; if it is actually an immutable tag, it will never advance",
+			pinned, template), false
+	}
+	if pv == tv {
+		return RelationAligned, fmt.Sprintf("both channels at %s (%s)", template, repo), false
+	}
+	if less(tv, pv) {
+		return RelationAhead, fmt.Sprintf("plugin channel is at %s, ahead of the template channel's %s — a capability-only update; run `seed template upgrade` when you want the structure too",
+			pinned, template), false
+	}
+	return RelationBehind, fmt.Sprintf("plugin channel is pinned to %s but the template channel has moved on to %s — the pin is stale; run `seed plugin enable` to re-pin, or set the ref deliberately",
+		pinned, template), true
+}
+
+// parseVersion reads a vX.Y.Z tag. Anything else (a branch, a sha, a
+// bare name) is not a release pin and is treated as a moving ref.
+func parseVersion(ref string) ([3]int, bool) {
+	var out [3]int
+	body, ok := strings.CutPrefix(ref, "v")
+	if !ok {
+		return out, false
+	}
+	parts := strings.Split(body, ".")
+	if len(parts) != 3 {
+		return out, false
+	}
+	for i, p := range parts {
+		// strconv.Atoi accepts a leading + or -, so `v+1.2.3` would pass
+		// as a release tag and a legitimate ref spelled that way would be
+		// reported stale instead of floating.
+		if p == "" || strings.TrimLeft(p, "0123456789") != "" {
+			return out, false
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return out, false
+		}
+		out[i] = n
+	}
+	return out, true
+}
+
+func less(a, b [3]int) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
 }
