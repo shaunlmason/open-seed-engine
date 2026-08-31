@@ -66,8 +66,12 @@ func Parse(content string) *Plan {
 			cmds = []string{trimmed}
 		case strings.HasPrefix(trimmed, "- "):
 			rest := strings.TrimPrefix(trimmed, "- ")
-			if spans := backtickSpans(rest); len(spans) > 0 {
-				cmds = spans
+			if strings.ContainsRune(rest, '`') {
+				// Any backtick opts the bullet into span form: the
+				// spans are the commands, and a bullet whose ticks
+				// never close yields nothing rather than running its
+				// annotation text wholesale.
+				cmds = backtickSpans(rest)
 			} else {
 				cmds = []string{rest}
 			}

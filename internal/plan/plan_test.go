@@ -52,6 +52,13 @@ func TestParseLabeledCommands(t *testing.T) {
 	if len(odd.ValidationCommands) != 2 || odd.ValidationCommands[1] != "go vet ./..." {
 		t.Fatalf("odd backticks: %v", odd.ValidationCommands)
 	}
+	// A bullet with ONLY an unclosed backtick produces no commands at
+	// all: malformed inline-code syntax must never run wholesale as a
+	// legacy bullet.
+	lone := Parse(strings.Replace(good, "- go test ./...", "- Boundary: `go test ./...", 1))
+	if len(lone.ValidationCommands) != 1 || lone.ValidationCommands[0] != "make check" {
+		t.Fatalf("a lone-backtick bullet must yield nothing: %v", lone.ValidationCommands)
+	}
 }
 
 func TestParseFencedCommands(t *testing.T) {
