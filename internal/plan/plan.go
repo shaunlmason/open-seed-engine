@@ -26,7 +26,11 @@ func Hash(content string) string {
 }
 
 // Parse splits ## sections and extracts validation commands from bullets
-// (`- cmd`, backticks stripped) and fenced code blocks in that section.
+// and fenced code blocks in that section. A bullet's inline code spans,
+// when present, are the commands, each span one command: prose around
+// them is annotation for the reader (a "Boundary:" label, an "and"
+// between two commands), never shell input. A bullet without spans runs
+// whole, the legacy form.
 func Parse(content string) *Plan {
 	p := &Plan{Sections: map[string]string{}}
 	var current string
@@ -56,18 +60,47 @@ func Parse(content string) *Plan {
 			inFence = !inFence
 			continue
 		}
-		var cmd string
+		var cmds []string
 		switch {
 		case inFence && trimmed != "":
-			cmd = trimmed
+			cmds = []string{trimmed}
 		case strings.HasPrefix(trimmed, "- "):
-			cmd = strings.Trim(strings.TrimPrefix(trimmed, "- "), "`")
+			rest := strings.TrimPrefix(trimmed, "- ")
+			if spans := backtickSpans(rest); len(spans) > 0 {
+				cmds = spans
+			} else {
+				cmds = []string{rest}
+			}
 		}
-		if cmd != "" && !strings.HasPrefix(cmd, "#") {
-			p.ValidationCommands = append(p.ValidationCommands, cmd)
+		for _, cmd := range cmds {
+			if cmd != "" && !strings.HasPrefix(cmd, "#") {
+				p.ValidationCommands = append(p.ValidationCommands, cmd)
+			}
 		}
 	}
 	return p
+}
+
+// backtickSpans returns a line's inline code spans in order, trimmed,
+// empties dropped. An unclosed backtick ends the scan: the tail is
+// prose, not a command.
+func backtickSpans(s string) []string {
+	var spans []string
+	for {
+		open := strings.IndexByte(s, '`')
+		if open < 0 {
+			return spans
+		}
+		rest := s[open+1:]
+		end := strings.IndexByte(rest, '`')
+		if end < 0 {
+			return spans
+		}
+		if span := strings.TrimSpace(rest[:end]); span != "" {
+			spans = append(spans, span)
+		}
+		s = rest[end+1:]
+	}
 }
 
 // Lint enforces the D3 grammar: all required sections present and non-empty,
