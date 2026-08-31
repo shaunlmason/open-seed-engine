@@ -32,6 +32,35 @@ func TestParseCommands(t *testing.T) {
 	}
 }
 
+func TestParseLabeledCommands(t *testing.T) {
+	labeled := strings.Replace(good,
+		"- `make check`\n- go test ./...",
+		"- Boundary: `go test ./internal/thing/...`\n- Retention: `go test ./...` and `make check`", 1)
+	p := Parse(labeled)
+	want := []string{"go test ./internal/thing/...", "go test ./...", "make check"}
+	if len(p.ValidationCommands) != len(want) {
+		t.Fatalf("commands = %v", p.ValidationCommands)
+	}
+	for i, w := range want {
+		if p.ValidationCommands[i] != w {
+			t.Fatalf("command %d = %q, want %q (all: %v)", i, p.ValidationCommands[i], w, p.ValidationCommands)
+		}
+	}
+	// An unclosed backtick yields no span; the bullet then has spans
+	// from its closed pair only.
+	odd := Parse(strings.Replace(good, "- go test ./...", "- Odd: `go vet ./...` and `broken", 1))
+	if len(odd.ValidationCommands) != 2 || odd.ValidationCommands[1] != "go vet ./..." {
+		t.Fatalf("odd backticks: %v", odd.ValidationCommands)
+	}
+	// A bullet with ONLY an unclosed backtick produces no commands at
+	// all: malformed inline-code syntax must never run wholesale as a
+	// legacy bullet.
+	lone := Parse(strings.Replace(good, "- go test ./...", "- Boundary: `go test ./...", 1))
+	if len(lone.ValidationCommands) != 1 || lone.ValidationCommands[0] != "make check" {
+		t.Fatalf("a lone-backtick bullet must yield nothing: %v", lone.ValidationCommands)
+	}
+}
+
 func TestParseFencedCommands(t *testing.T) {
 	fenced := strings.Replace(good,
 		"- `make check`\n- go test ./...",
