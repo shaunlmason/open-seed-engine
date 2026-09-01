@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -46,6 +47,9 @@ type Precondition struct {
 	Name      string `json:"name"`
 	FailError string `json:"fail_error"`
 	FailExit  int    `json:"fail_exit"`
+	// FailDetail is the refusal's teaching text, carried by the table so
+	// the explanation lives beside the rule rather than in a caller.
+	FailDetail string `json:"fail_detail"`
 }
 
 type Override struct {
@@ -94,6 +98,25 @@ type Table struct {
 	EffectVocabulary map[string]string        `json:"effect_vocabulary"`
 	Transitions      []Transition             `json:"transitions"`
 	CompositeVerbs   map[string]CompositeVerb `json:"composite_verbs"`
+	// Verbs that mutate a card without being transitions. They are
+	// declared here so every surface can enumerate the whole verb set
+	// from the table: a transport that hand-maintains its own list
+	// silently drops verbs, which is how record-evidence was reachable
+	// from the CLI and not from MCP.
+	WorkerVerbsOutsideTable   map[string]map[string]any `json:"worker_verbs_outside_table"`
+	OperatorVerbsOutsideTable map[string]map[string]any `json:"operator_verbs_outside_table"`
+}
+
+// VerbsOutsideTable names every declared non-transition verb.
+func (t Table) VerbsOutsideTable() []string {
+	var out []string
+	for _, m := range []map[string]map[string]any{t.WorkerVerbsOutsideTable, t.OperatorVerbsOutsideTable} {
+		for v := range m {
+			out = append(out, v)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 type Spec struct {

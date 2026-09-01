@@ -43,14 +43,21 @@ type Card struct {
 type Request struct {
 	Verb string
 	To   string
+	// Resolution is the evidence an accepting verb records. The
+	// resolution_present precondition reads it, so the requirement stays
+	// in the table rather than in a caller's branch.
+	Resolution string
 }
 
 // Outcome is the decision. Code is a port exit code from port.json. When
 // Transitioned is false with Code 0, the verb succeeded without a state
 // change (e.g. unblock removed one blocked_on entry of several).
 type Outcome struct {
-	Code         int
-	Err          string
+	Code int
+	Err  string
+	// Detail is the refusing rule's own explanation, when the table
+	// carries one.
+	Detail       string
 	NewState     string
 	Transitioned bool
 	Effects      []string
@@ -98,8 +105,10 @@ func Evaluate(s *spec.Spec, req Request, card Card, cred Credential) Outcome {
 
 	if override == "" {
 		for _, pc := range edge.Preconditions {
-			if err := checkPrecondition(pc, card, cred); err != "" {
-				return fail(pc.FailExit, err)
+			if err := checkPrecondition(pc, card, cred, req); err != "" {
+				out := fail(pc.FailExit, err)
+				out.Detail = pc.FailDetail
+				return out
 			}
 		}
 	}
@@ -148,8 +157,16 @@ func satisfiedOverride(edge *spec.Transition, card Card) *spec.Override {
 	return nil
 }
 
-func checkPrecondition(pc spec.Precondition, card Card, cred Credential) string {
+func checkPrecondition(pc spec.Precondition, card Card, cred Credential, req Request) string {
 	switch pc.Name {
+	case "resolution_present":
+		// Accepting claims the work is finished, so it must say what
+		// evidences that. A done card with no evidence fails the D7
+		// conformance lint, and `done` is terminal, so nothing can
+		// transition it back to repair it.
+		if strings.TrimSpace(req.Resolution) == "" {
+			return pc.FailError
+		}
 	case "unclaimed":
 		if card.ClaimToken != "" {
 			return pc.FailError

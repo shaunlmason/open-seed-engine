@@ -133,7 +133,7 @@ func TestLifecycleOverMCP(t *testing.T) {
 	}
 	for _, want := range []string{"task_create", "task_ready", "task_get", "task_list", "task_claim",
 		"task_lease_renew", "task_release", "task_transition", "task_close", "task_comment",
-		"task_attach_evidence", "task_plan_unblock", "task_promote", "task_deprioritize",
+		"task_attach_evidence", "task_record_evidence", "task_plan_unblock", "task_promote", "task_deprioritize",
 		"task_reject", "task_cancel", "task_reinstate", "task_block", "task_unblock"} {
 		if !names[want] {
 			t.Fatalf("tools/list missing %s: %v", want, names)

@@ -3,6 +3,7 @@ package port
 import (
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/shaunlmason/open-seed-engine/internal/spec"
@@ -70,13 +71,20 @@ func allVerbs(s *spec.Spec) []verbCase {
 		}
 		named[tr.Verb] = true
 	}
+	// Every request carries a resolution, and every request is repeated
+	// without one: the resolution_present precondition on the accept edge
+	// has two sides, and a sweep that only ever passed evidence would
+	// never reach the refusing one.
 	for v := range named {
+		out = append(out, verbCase{Request{Verb: v, Resolution: "https://example.invalid/pr/1"}})
 		out = append(out, verbCase{Request{Verb: v}})
 	}
 	for cv := range s.Table.CompositeVerbs {
+		out = append(out, verbCase{Request{Verb: cv, Resolution: "https://example.invalid/pr/1"}})
 		out = append(out, verbCase{Request{Verb: cv}})
 	}
 	for _, to := range s.Port.States {
+		out = append(out, verbCase{Request{Verb: "transition", To: to, Resolution: "https://example.invalid/pr/1"}})
 		out = append(out, verbCase{Request{Verb: "transition", To: to}})
 	}
 	return out
@@ -124,6 +132,10 @@ func expect(s *spec.Spec, req Request, card Card, cred Credential) expectation {
 	}
 	for _, pc := range edge.Preconditions {
 		switch pc.Name {
+		case "resolution_present":
+			if strings.TrimSpace(req.Resolution) == "" {
+				return expectation{code: pc.FailExit}
+			}
 		case "unclaimed":
 			if card.ClaimToken != "" {
 				return expectation{code: pc.FailExit}
@@ -211,13 +223,28 @@ func TestDesignInvariants(t *testing.T) {
 		}
 	})
 	t.Run("close is accept plus cascade, only from review", func(t *testing.T) {
-		got := Evaluate(s, Request{Verb: "close"}, Card{State: "review"}, op)
+		closing := Request{Verb: "close", Resolution: "https://example.invalid/pr/1"}
+		got := Evaluate(s, closing, Card{State: "review"}, op)
 		if got.Code != 0 || got.NewState != "done" || !slices.Contains(got.Effects, "cascade") || !slices.Contains(got.Effects, "record_review") {
 			t.Fatalf("close from review: %+v", got)
 		}
 		for _, st := range []string{"backlog", "ready", "in_progress", "blocked", "done", "cancelled"} {
-			if got := Evaluate(s, Request{Verb: "close"}, Card{State: st}, op); got.Code != spec.ExitInvalid {
+			if got := Evaluate(s, closing, Card{State: st}, op); got.Code != spec.ExitInvalid {
 				t.Errorf("close from %s: %+v", st, got)
+			}
+		}
+	})
+	t.Run("close and accept refuse without evidence, and say why", func(t *testing.T) {
+		// The requirement is the accept edge's precondition, so close
+		// inherits it by expansion rather than by a second rule, and the
+		// refusal carries the table's own explanation.
+		for _, verb := range []string{"accept", "close"} {
+			got := Evaluate(s, Request{Verb: verb}, Card{State: "review"}, op)
+			if got.Code != spec.ExitInvalid || got.Err != "resolution_required" {
+				t.Fatalf("%s with no resolution: %+v", verb, got)
+			}
+			if !strings.Contains(got.Detail, "--resolution") || !strings.Contains(got.Detail, "--no-pr") {
+				t.Fatalf("%s must teach both ways to satisfy it: %q", verb, got.Detail)
 			}
 		}
 	})
