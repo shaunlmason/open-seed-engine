@@ -82,5 +82,14 @@ func TestAcceptingToolsRequireEvidence(t *testing.T) {
 		if !found {
 			t.Errorf("%s must advertise resolution as required: the accept edge refuses without it (%v)", tl.Name, req)
 		}
+		// The D7 exemption has to be reachable too. The schema sets
+		// additionalProperties:false, so a property the tool describes but
+		// does not declare is one a schema-aware client cannot send: the
+		// evidence would land without its no-pr: marker and the card would
+		// keep failing lintDone.
+		props, _ := tl.InputSchema["properties"].(map[string]any)
+		if _, ok := props["no_pr"]; !ok {
+			t.Errorf("%s must declare no_pr: additionalProperties is false, so an undeclared property is unsendable", tl.Name)
+		}
 	}
 }

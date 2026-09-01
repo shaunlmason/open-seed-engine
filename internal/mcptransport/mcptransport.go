@@ -112,9 +112,11 @@ func Tools() []Tool {
 			// said could not happen.
 			InputSchema: schema([]string{"task", "actor", "resolution"}, map[string]any{
 				"task": str("task id"), "actor": str("operator identity"),
-				"resolution": str("evidence for the done card: the merged PR URL, or the artifact URL with no_pr")}),
+				"resolution": str("evidence for the done card: the merged PR URL, or the artifact URL with no_pr"),
+				"no_pr":      str("\"true\" for the D7 exemption: the evidence is a server-attributed artifact, not a PR")}),
 			handler: func(sv *task.Service, a args) *task.Result {
-				return sv.Transition(task.TransitionArgs{Verb: "close", ID: a.get("task"), Actor: a.get("actor"), Resolution: a.get("resolution")})
+				return sv.Transition(task.TransitionArgs{Verb: "close", ID: a.get("task"), Actor: a.get("actor"),
+					Resolution: a.get("resolution"), NoPR: a.get("no_pr") == "true"})
 			}},
 		{Name: "task_record_evidence",
 			Description: "Complete an accept that recorded no evidence (operator; only when the review block is accepted and its evidence is empty)",

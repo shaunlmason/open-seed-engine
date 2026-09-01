@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -204,5 +205,64 @@ func TestRepoProtocolVersionErrors(t *testing.T) {
 	}
 	if err := CheckVersion(&Spec{}, dir); err == nil {
 		t.Fatal("CheckVersion swallowed the read error")
+	}
+}
+
+// TestOlderTablesStillRequireEvidence pins the compatibility half. The
+// table ships in each consuming repository's .seed/port-schema/ and moves
+// independently of this binary, so a checkout still carrying a protocol-1
+// table written before resolution_present existed must not be able to
+// accept without evidence: that is the permanently lint-failing card the
+// requirement exists to prevent, and moving enforcement into the table is
+// what would otherwise have reopened it.
+func TestOlderTablesStillRequireEvidence(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join("testdata", "seed", "port-schema")
+	for _, name := range []string{"port.json", "transitions.json", "verbs.json"} {
+		b, err := os.ReadFile(filepath.Join(src, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if name == "transitions.json" {
+			// Strip the precondition back out: this is the older table.
+			var doc map[string]any
+			if err := json.Unmarshal(b, &doc); err != nil {
+				t.Fatal(err)
+			}
+			for _, raw := range doc["transitions"].([]any) {
+				tr := raw.(map[string]any)
+				if tr["verb"] == "accept" {
+					delete(tr, "preconditions")
+				}
+			}
+			if b, err = json.Marshal(doc); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s, err := Load(dir)
+	if err != nil {
+		t.Fatalf("an older table must still load: %v", err)
+	}
+	var found bool
+	for _, tr := range s.Table.Transitions {
+		if tr.Verb != "accept" {
+			continue
+		}
+		for _, pc := range tr.Preconditions {
+			if pc.Name == "resolution_present" {
+				found = true
+				if pc.FailError != "resolution_required" || pc.FailDetail == "" {
+					t.Fatalf("the upgraded precondition must carry its refusal and its teaching text: %+v", pc)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("an accept edge from a table predating resolution_present must be upgraded to carry it")
 	}
 }
