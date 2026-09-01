@@ -323,6 +323,17 @@ type TransitionArgs struct {
 }
 
 func (sv *Service) Transition(a TransitionArgs) *Result {
+	// An accept that records no evidence produces a done card the D7
+	// done-consistency lint refuses forever, and `done` is terminal, so
+	// nothing can transition it back to fix it: one missing flag reds every
+	// PR in the repository until an operator repairs the card out of band.
+	// Refuse at the door instead. `reject` is untouched: it returns the card
+	// to `ready`, where nothing is yet claimed to be finished.
+	if (a.Verb == "accept" || a.Verb == "close") && strings.TrimSpace(a.Resolution) == "" {
+		return failure(spec.ExitInvalid, "resolution_required", map[string]any{
+			"detail": "accepting evidences the work: pass --resolution <merged PR URL>, or --no-pr --resolution <artifact URL> for the D7 exemption (a done card with no evidence fails the conformance lint and `done` is terminal, so it cannot be fixed by another transition)",
+		})
+	}
 	var newState string
 	var transitioned bool
 	var cascaded []string
@@ -572,6 +583,66 @@ func (sv *Service) LeaseRenew(id, actor, token, lease string) *Result {
 		return errResult(err)
 	}
 	return ok(map[string]any{"verb": "lease-renew", "task": id, "lease_expires": expires})
+}
+
+// RecordEvidence completes an accept that recorded none: an operator verb
+// OUTSIDE the transition table, because `done` is terminal and the spec
+// validator refuses every outgoing edge from a terminal state, so no
+// transition could ever express this.
+//
+// It is not a field-set verb, and the port's "there is no free-form
+// field-set verb" still holds. It finishes the one operation that was left
+// half-done, under conditions that make anything else impossible: the card
+// must already carry an ACCEPTED review block whose evidence is EMPTY, so
+// an existing attestation can never be overwritten and one can never be
+// fabricated for a card nobody accepted. Reviewer and reviewed_at are left
+// exactly as the accept wrote them: this records what the evidence was,
+// never who reviewed or when.
+//
+// The gap it closes is a real one. `accept` used to take an empty
+// --resolution, and the resulting card failed the D7 done-consistency lint
+// forever with no way back: a single missing flag could red every PR in the
+// repository. The companion half of this change refuses that accept at the
+// door, so this verb is the repair for cards created before the refusal
+// existed rather than a routine part of the loop.
+func (sv *Service) RecordEvidence(id, actor, resolution string, noPR bool) *Result {
+	if !sv.Cfg.IsOperator(actor) {
+		return failure(spec.ExitInvalid, "operator_required", nil)
+	}
+	if strings.TrimSpace(resolution) == "" {
+		return failure(spec.ExitInvalid, "resolution_required", nil)
+	}
+	evidence := resolution
+	if noPR {
+		evidence = "no-pr:" + evidence
+	}
+	_, err := sv.Store.Mutate(true, func(head string) (*stateref.Mutation, error) {
+		c, err := sv.loadCard(head, id)
+		if err != nil {
+			return nil, err
+		}
+		if c.Review == nil || c.Review.Outcome != "accepted" {
+			return nil, &stateref.Terminal{Code: spec.ExitInvalid, Name: "no_accepted_review"}
+		}
+		if c.Review.Evidence != "" {
+			return nil, &stateref.Terminal{Code: spec.ExitInvalid, Name: "evidence_already_recorded"}
+		}
+		c.Review.Evidence = evidence
+		c.UpdatedAt = sv.now()
+		content, err := c.Serialize()
+		if err != nil {
+			return nil, err
+		}
+		return &stateref.Mutation{
+			Message: "record-evidence " + id,
+			Changes: []gitx.Change{{Path: card.Path(id), Content: content}},
+			Events:  []string{sv.event(actor, "record-evidence", id, map[string]any{"evidence": evidence})},
+		}, nil
+	})
+	if err != nil {
+		return errResult(err)
+	}
+	return ok(map[string]any{"verb": "record-evidence", "task": id, "evidence": evidence})
 }
 
 // Resume clears the HALT marker (operator only, §7.2).
