@@ -179,6 +179,10 @@ commands:
     release <id> --actor A --token T
     accept|reject|cancel|promote|deprioritize|block|unblock|reinstate|close <id>
            --actor A [--resolution MSG] [--blocked-on entry] [--no-pr]
+    record-evidence <id> --actor A --resolution URL [--no-pr]
+                                 complete an accept that recorded none
+                                 (operator; only when the review block is
+                                 accepted and its evidence is empty)
     plan-unblock <id> --pr N --actor A     remove a plan:<N> entry (operator;
            the caller has established the PR is merged or closed)
     comment <id> --actor A --body B [--token T]
@@ -467,6 +471,8 @@ func runTask(args []string, stdout, stderr *os.File) int {
 			return sv.Append(*kind, id, *actor, *token, "", *ref)
 		case "lease-renew":
 			return sv.LeaseRenew(id, *actor, *token, *lease)
+		case "record-evidence":
+			return sv.RecordEvidence(id, *actor, *resolution, *noPR)
 		default:
 			if operatorVerbs[verb] {
 				return sv.Transition(task.TransitionArgs{Verb: verb, ID: id, To: *to,
