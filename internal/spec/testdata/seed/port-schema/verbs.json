@@ -35,7 +35,7 @@
       "errors": {"invalid_transition": {"exit": 3}, "fenced_out": {"exit": 6}}
     },
     "close": {
-      "args": {"task": "required", "resolution": "string message", "no-pr": "flag: human close via workflow_dispatch (D7 exemption; server-attributed)"},
+      "args": {"task": "required", "resolution": "required: the merged PR URL, or the artifact URL with no-pr. The accept edge's resolution_present precondition refuses without it", "no-pr": "flag: human close via workflow_dispatch (D7 exemption; server-attributed)"},
       "output": {"task": "id", "state": "done", "cascaded": "[task ids unblocked]"},
       "errors": {"invalid_transition": {"exit": 3, "notes": "only legal from review"}}
     },

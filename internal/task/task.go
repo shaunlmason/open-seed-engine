@@ -323,17 +323,6 @@ type TransitionArgs struct {
 }
 
 func (sv *Service) Transition(a TransitionArgs) *Result {
-	// An accept that records no evidence produces a done card the D7
-	// done-consistency lint refuses forever, and `done` is terminal, so
-	// nothing can transition it back to fix it: one missing flag reds every
-	// PR in the repository until an operator repairs the card out of band.
-	// Refuse at the door instead. `reject` is untouched: it returns the card
-	// to `ready`, where nothing is yet claimed to be finished.
-	if (a.Verb == "accept" || a.Verb == "close") && strings.TrimSpace(a.Resolution) == "" {
-		return failure(spec.ExitInvalid, "resolution_required", map[string]any{
-			"detail": "accepting evidences the work: pass --resolution <merged PR URL>, or --no-pr --resolution <artifact URL> for the D7 exemption (a done card with no evidence fails the conformance lint and `done` is terminal, so it cannot be fixed by another transition)",
-		})
-	}
 	var newState string
 	var transitioned bool
 	var cascaded []string
@@ -343,9 +332,14 @@ func (sv *Service) Transition(a TransitionArgs) *Result {
 			return nil, err
 		}
 		cred := sv.credential(a.Verb, a.Actor, a.Token)
-		out := port.Evaluate(sv.Spec, port.Request{Verb: a.Verb, To: a.To}, sv.portCard(c), cred)
+		out := port.Evaluate(sv.Spec, port.Request{Verb: a.Verb, To: a.To, Resolution: a.Resolution},
+			sv.portCard(c), cred)
 		if out.Code != 0 {
-			return nil, &stateref.Terminal{Code: out.Code, Name: out.Err}
+			t := &stateref.Terminal{Code: out.Code, Name: out.Err}
+			if out.Detail != "" {
+				t.Data = map[string]any{"detail": out.Detail}
+			}
+			return nil, t
 		}
 		newState, transitioned = out.NewState, out.Transitioned
 		mut := &stateref.Mutation{Message: a.Verb + " " + a.ID + " → " + out.NewState}

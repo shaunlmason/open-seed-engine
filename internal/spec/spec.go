@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -46,6 +47,9 @@ type Precondition struct {
 	Name      string `json:"name"`
 	FailError string `json:"fail_error"`
 	FailExit  int    `json:"fail_exit"`
+	// FailDetail is the refusal's teaching text, carried by the table so
+	// the explanation lives beside the rule rather than in a caller.
+	FailDetail string `json:"fail_detail"`
 }
 
 type Override struct {
@@ -94,6 +98,25 @@ type Table struct {
 	EffectVocabulary map[string]string        `json:"effect_vocabulary"`
 	Transitions      []Transition             `json:"transitions"`
 	CompositeVerbs   map[string]CompositeVerb `json:"composite_verbs"`
+	// Verbs that mutate a card without being transitions. They are
+	// declared here so every surface can enumerate the whole verb set
+	// from the table: a transport that hand-maintains its own list
+	// silently drops verbs, which is how record-evidence was reachable
+	// from the CLI and not from MCP.
+	WorkerVerbsOutsideTable   map[string]map[string]any `json:"worker_verbs_outside_table"`
+	OperatorVerbsOutsideTable map[string]map[string]any `json:"operator_verbs_outside_table"`
+}
+
+// VerbsOutsideTable names every declared non-transition verb.
+func (t Table) VerbsOutsideTable() []string {
+	var out []string
+	for _, m := range []map[string]map[string]any{t.WorkerVerbsOutsideTable, t.OperatorVerbsOutsideTable} {
+		for v := range m {
+			out = append(out, v)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 type Spec struct {
@@ -112,10 +135,47 @@ func Load(dir string) (*Spec, error) {
 	if err := readJSON(filepath.Join(dir, "transitions.json"), &s.Table); err != nil {
 		return nil, err
 	}
+	s.Table.ensureAcceptEvidence()
 	if errs := s.Validate(); len(errs) > 0 {
 		return nil, fmt.Errorf("invalid spec in %s: %s", dir, joinErrs(errs))
 	}
 	return &s, nil
+}
+
+// acceptEvidence is the precondition an accept edge must carry: accepting
+// claims the work is finished, so it must say what evidences that.
+var acceptEvidence = Precondition{
+	Name:      "resolution_present",
+	FailError: "resolution_required",
+	FailExit:  ExitInvalid,
+	FailDetail: "accepting evidences the work: pass --resolution <merged PR URL>, or --no-pr " +
+		"--resolution <artifact URL> for the D7 exemption. A done card with no evidence fails " +
+		"the conformance lint, and done is terminal, so no transition can repair it.",
+}
+
+// ensureAcceptEvidence adds that precondition to any accept edge whose
+// table predates it. Enforcement lives in the table and nowhere else, but
+// the table ships in each consuming repository's .seed/port-schema/ and
+// those move independently of this binary: a checkout still carrying a
+// protocol-1 table written before the precondition existed would validate
+// fine, evaluate no precondition, and accept an evidence-free close,
+// recreating the permanently lint-failing card the requirement exists to
+// prevent. Upgrading the loaded table keeps ONE enforcement path rather
+// than adding a second one beside it, and a schema that already declares
+// the precondition is left exactly as written.
+func (t *Table) ensureAcceptEvidence() {
+	for i := range t.Transitions {
+		tr := &t.Transitions[i]
+		if tr.Verb != "accept" {
+			continue
+		}
+		if slices.ContainsFunc(tr.Preconditions, func(p Precondition) bool {
+			return p.Name == acceptEvidence.Name
+		}) {
+			continue
+		}
+		tr.Preconditions = append(tr.Preconditions, acceptEvidence)
+	}
 }
 
 func readJSON(path string, v any) error {

@@ -54,7 +54,10 @@
      "notes": "Each path removes only its own blocked_on entry; the transition fires only when the set empties. Auto-paths run shim-mediated under an operator credential."},
     {"from": "blocked", "to": "cancelled", "verb": "cancel", "class": "operator", "effects": ["cascade"]},
 
-    {"from": "review", "to": "done", "verb": "accept", "class": "operator", "effects": ["record_review"]},
+    {"from": "review", "to": "done", "verb": "accept", "class": "operator", "effects": ["record_review"],
+     "preconditions": [{"name": "resolution_present", "fail_error": "resolution_required", "fail_exit": 3,
+       "fail_detail": "accepting evidences the work: pass --resolution <merged PR URL>, or --no-pr --resolution <artifact URL> for the D7 exemption. A done card with no evidence fails the conformance lint, and done is terminal, so no transition can repair it."}],
+     "notes": "Accepting evidences the work: the resolution is the merged PR URL, or the server-attributed artifact URL under the no-pr exemption. A done card carrying no evidence fails the D7 conformance lint, and done is terminal, so no transition can repair it. The requirement belongs here, not in a caller."},
     {"from": "review", "to": "ready", "verb": "reject", "class": "operator",
      "effects": ["append_rejected_author", "record_review"]},
     {"from": "review", "to": "cancelled", "verb": "cancel", "class": "operator", "effects": ["cascade"]},
@@ -71,6 +74,11 @@
       "expands_to": "transition",
       "fixed_to": "ready",
       "notes": "Convenience name for the worker release edge in_progress→ready."
+    }
+  },
+  "operator_verbs_outside_table": {
+    "record-evidence": {
+      "notes": "Completes an accept that recorded no evidence: legal only when the review block is accepted and its evidence is empty, so an attestation can never be overwritten or fabricated. It is not a field-set verb and `done` stays terminal: no transition could express this, because the validator refuses every outgoing edge from a terminal state."
     }
   },
   "worker_verbs_outside_table": {
