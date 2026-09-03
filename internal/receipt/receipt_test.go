@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -304,5 +305,43 @@ func TestSameCommandsAndWriteFile(t *testing.T) {
 	}
 	if _, err := os.Stat(Path(root, "os-t")); err != nil {
 		t.Fatal("receipt not written")
+	}
+}
+
+// The diff hash is a claim about the change, not about the clone that
+// computed it: git abbreviates the index line's blob ids to a length
+// that grows with the object count (seven hex digits below 16384
+// objects, eight above), so without --full-index a receipt generated
+// in a partial clone mismatched in CI's full clone once the repository
+// crossed that count. Two clones that differ only in core.abbrev, the
+// knob that stands in for the object count, hash the same diff.
+func TestDiffHashIsIndependentOfTheCloneAbbreviation(t *testing.T) {
+	f := newFixture(t)
+	f.write("README.md", "hello\n")
+	f.commitAll("init")
+	f.planAndBranch("os-abbrev")
+	f.write("src/a.go", "package a\n")
+	f.commitAll("work")
+
+	f.git("config", "core.abbrev", "7")
+	short, err := Generate(f.repo, "os-abbrev", "main", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.git("config", "core.abbrev", "40")
+	long, err := Generate(f.repo, "os-abbrev", "main", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if short.DiffSHA256 != long.DiffSHA256 {
+		t.Fatalf("the diff hash depends on core.abbrev: %s vs %s", short.DiffSHA256, long.DiffSHA256)
+	}
+	// The bytes hashed carry the full ids, so no abbreviation can reach them.
+	out, err := f.repo.Git("diff", "--full-index", short.MergeBase, short.Head, "--", ".", diffExclude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`(?m)^index [0-9a-f]{40}\.\.[0-9a-f]{40}`).MatchString(out) {
+		t.Fatalf("the hashed diff does not carry full blob ids:\n%s", out)
 	}
 }

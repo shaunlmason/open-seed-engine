@@ -85,7 +85,13 @@ func Generate(repo *gitx.Repo, taskID, baseRef string, opts Options) (*Receipt, 
 		files = strings.Split(strings.TrimSpace(filesOut), "\n")
 	}
 	slices.Sort(files)
-	diffContent, err := repo.Git("diff", mb, head, "--", ".", diffExclude)
+	// --full-index: the diff's index lines carry the full blob ids rather
+	// than git's auto-abbreviated ones, whose length grows with the
+	// clone's object count (seven hex digits below 16384 objects, eight
+	// above), so a receipt generated in a partial clone and regenerated
+	// in CI's full clone hash the same bytes (R11: CI is the author of
+	// record, and the claim it checks must not depend on the clone).
+	diffContent, err := repo.Git("diff", "--full-index", mb, head, "--", ".", diffExclude)
 	if err != nil {
 		return nil, err
 	}
