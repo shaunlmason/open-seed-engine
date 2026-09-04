@@ -1,7 +1,9 @@
 // Package prclass classifies PRs by head branch (open-seed D3 purity rule):
 // plan PRs (seed/<id>-plan) touch exactly one plan file; task PRs (seed/<id>)
 // may not touch plans/** at all, not even another task's plan, which would
-// launder plan tampering through an unrelated review.
+// launder plan tampering through an unrelated review, and may touch no
+// receipt but their own, which would launder a forged evidence record the
+// same way.
 package prclass
 
 import (
@@ -45,9 +47,13 @@ func CheckPurity(kind Kind, taskID string, files []string) error {
 			return fmt.Errorf("plan PR must touch exactly %s, got %v", want, files)
 		}
 	case TaskPR:
+		ownReceipt := "receipts/" + taskID + ".json"
 		for _, f := range files {
-			if strings.HasPrefix(f, "plans/") {
+			switch {
+			case strings.HasPrefix(f, "plans/"):
 				return fmt.Errorf("task PR touches %s — task PRs may not touch plans/** (D3 purity)", f)
+			case strings.HasPrefix(f, "receipts/") && f != ownReceipt:
+				return fmt.Errorf("task PR touches %s — a task PR may touch no receipt but its own, %s (D3 purity)", f, ownReceipt)
 			}
 		}
 	}

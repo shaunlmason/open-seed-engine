@@ -36,9 +36,14 @@ func TestPurity(t *testing.T) {
 	if err := CheckPurity(TaskPR, "os-1a2b", []string{"src/x.go", "receipts/os-1a2b.json"}); err != nil {
 		t.Errorf("clean task PR rejected: %v", err)
 	}
-	// The laundering case: a task PR touching ANOTHER task's plan.
+	// The laundering cases: a task PR touching ANOTHER task's plan, or
+	// another task's receipt. The hashed diff excludes receipts/**, so the
+	// second one is invisible to every other gate.
 	if err := CheckPurity(TaskPR, "os-1a2b", []string{"src/x.go", "plans/os-9999.md"}); err == nil {
 		t.Error("task PR touching plans/** accepted")
+	}
+	if err := CheckPurity(TaskPR, "os-1a2b", []string{"src/x.go", "receipts/os-9999.json"}); err == nil {
+		t.Error("task PR touching another task's receipt accepted")
 	}
 	if err := CheckPurity(Other, "", []string{"anything"}); err != nil {
 		t.Errorf("other PR gated: %v", err)

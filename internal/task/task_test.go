@@ -17,6 +17,20 @@ func TestMain(m *testing.M) {
 	for _, kv := range [][2]string{
 		{"GIT_AUTHOR_NAME", "test"}, {"GIT_AUTHOR_EMAIL", "test@test"},
 		{"GIT_COMMITTER_NAME", "test"}, {"GIT_COMMITTER_EMAIL", "test@test"},
+		// Auto maintenance off for every git process this package spawns,
+		// its own children included. A push into the bare origin ends with
+		// `git gc --auto`, which detaches by default (gc.autoDetach), so the
+		// push returns while a process is still writing into origin.git. The
+		// test body then ends, t.TempDir's RemoveAll walks a directory that
+		// is still growing, and the run fails in cleanup rather than on an
+		// assertion: "unlinkat .../origin.git: directory not empty". It is
+		// timing-dependent, so it surfaces on a loaded runner and hides on a
+		// developer machine (and on any machine whose global config already
+		// sets gc.auto=0). These repositories live for one test and are
+		// deleted; there is nothing here to maintain.
+		{"GIT_CONFIG_COUNT", "2"},
+		{"GIT_CONFIG_KEY_0", "gc.auto"}, {"GIT_CONFIG_VALUE_0", "0"},
+		{"GIT_CONFIG_KEY_1", "maintenance.auto"}, {"GIT_CONFIG_VALUE_1", "false"},
 	} {
 		os.Setenv(kv[0], kv[1])
 	}
