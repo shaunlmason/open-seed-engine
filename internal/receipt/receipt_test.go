@@ -1,10 +1,13 @@
 package receipt
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -97,10 +100,19 @@ func (f *fixture) generateAndCommitReceipt(id string) {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if err := r.WriteFile(f.dir); err != nil {
+	if err := r.WriteClaim(f.dir); err != nil {
 		f.t.Fatal(err)
 	}
 	f.commitAll("receipt " + id)
+}
+
+func (f *fixture) verify(id string) *Report {
+	f.t.Helper()
+	rep, err := Verify(f.repo, id, "main", "seed/"+id, Options{RunValidation: true})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return rep
 }
 
 func failuresContain(rep *Report, substr string) bool {
@@ -198,9 +210,10 @@ func TestVerifyStalePlanThenAmendmentFlow(t *testing.T) {
 	}
 }
 
-// Done-when: a forged local receipt is caught; the regenerated receipt is
-// authoritative and overwrites it.
-func TestVerifyForgedReceiptOverwritten(t *testing.T) {
+// Done-when: a forged local receipt is caught. What a claim can lie about is
+// which plan it was implemented against, and that is what is compared: the
+// regenerated claim is authoritative and overwrites it (R11).
+func TestVerifyForgedPlanPinOverwritten(t *testing.T) {
 	f := newFixture(t)
 	f.write("README.md", "hi\n")
 	f.commitAll("init")
@@ -209,32 +222,207 @@ func TestVerifyForgedReceiptOverwritten(t *testing.T) {
 	f.commitAll("implement")
 	f.generateAndCommitReceipt("os-4444")
 
-	// Forge: claim a different diff hash (e.g. hiding an extra change).
+	// Forge: claim a plan pin that is not the approved plan's, the way an
+	// implementer would to make work against an unapproved plan look gated.
 	p := Path(f.dir, "os-4444")
 	b, _ := os.ReadFile(p)
-	forged := strings.Replace(string(b), `"diff_sha256": "`, `"diff_sha256": "0000`, 1)
+	forged := strings.Replace(string(b), `"plan_sha256": "`, `"plan_sha256": "0000`, 1)
 	os.WriteFile(p, []byte(forged), 0o644)
 	f.commitAll("forge receipt")
 
-	rep, err := Verify(f.repo, "os-4444", "main", "seed/os-4444", Options{RunValidation: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rep.OK || !failuresContain(rep, "receipt mismatch") {
+	rep := f.verify("os-4444")
+	if rep.OK || !failuresContain(rep, "but the approved plan at the merge base is") {
 		t.Fatalf("forgery not caught: ok=%v failures=%v", rep.OK, rep.Failures)
 	}
 
-	// Author of record: write the regenerated receipt over the forged one.
-	if err := rep.Regenerated.WriteFile(f.dir); err != nil {
+	// Author of record: write the regenerated claim over the forged one.
+	if err := rep.Regenerated.WriteClaim(f.dir); err != nil {
 		t.Fatal(err)
 	}
 	f.commitAll("authoritative receipt")
-	rep, err = Verify(f.repo, "os-4444", "main", "seed/os-4444", Options{RunValidation: true})
+	if rep := f.verify("os-4444"); !rep.OK {
+		t.Fatalf("post-overwrite verify failed: %v", rep.Failures)
+	}
+}
+
+// The claim is stable under everything that used to invalidate it. A receipt
+// generated mid-branch survives further commits, a merge of the base, and the
+// base moving underneath: none of those change the plan it was implemented
+// against, and the snapshot they do change is CI's to recompute (R11). This is
+// the regression that made the gate a bottleneck: every one of these pushes
+// used to turn verify red with "receipt mismatch".
+func TestClaimSurvivesLaterPushesAndBaseMerges(t *testing.T) {
+	f := newFixture(t)
+	f.write("README.md", "hi\n")
+	f.commitAll("init")
+	f.planAndBranch("os-8888")
+	f.write("src/thing.txt", "first\n")
+	f.commitAll("implement")
+	f.generateAndCommitReceipt("os-8888")
+	if rep := f.verify("os-8888"); !rep.OK {
+		t.Fatalf("baseline verify failed: %v", rep.Failures)
+	}
+
+	// A review fix lands after the receipt.
+	f.write("src/thing.txt", "reviewed\n")
+	f.commitAll("address review")
+	if rep := f.verify("os-8888"); !rep.OK {
+		t.Fatalf("a later content commit invalidated the claim: %v", rep.Failures)
+	}
+
+	// Unrelated work lands on the base and the branch takes it, moving the
+	// merge base and with it the whole diff.
+	f.git("checkout", "-q", "main")
+	f.write("other/file.txt", "unrelated\n")
+	f.commitAll("unrelated work on main")
+	f.git("checkout", "-q", "seed/os-8888")
+	f.git("merge", "-q", "--no-edit", "main")
+	if rep := f.verify("os-8888"); !rep.OK {
+		t.Fatalf("merging the base invalidated the claim: %v", rep.Failures)
+	}
+}
+
+// A branch cut before its own plan PR merged is a mechanical problem with one
+// remedy, not a D3 violation, and says so.
+func TestPlanMergedAfterTheBranchWasCut(t *testing.T) {
+	f := newFixture(t)
+	f.write("README.md", "hi\n")
+	f.commitAll("init")
+	f.git("checkout", "-q", "-b", "seed/os-9999")
+	f.write("src/thing.txt", "work\n")
+	f.commitAll("implement")
+	// The plan PR merges only now, after the branch point.
+	f.git("checkout", "-q", "main")
+	f.write("plans/os-9999.md", goodPlan)
+	f.commitAll("plan os-9999")
+	f.git("checkout", "-q", "seed/os-9999")
+
+	rep := f.verify("os-9999")
+	if rep.OK || !failuresContain(rep, "merged after this branch was cut") {
+		t.Fatalf("diagnosis missing: ok=%v failures=%v", rep.OK, rep.Failures)
+	}
+	if failuresContain(rep, "no approved plan") {
+		t.Fatal("a branch behind its plan was reported as an unplanned branch")
+	}
+	// The remedy the message names actually works.
+	f.git("merge", "-q", "--no-edit", "main")
+	f.generateAndCommitReceipt("os-9999")
+	if rep := f.verify("os-9999"); !rep.OK {
+		t.Fatalf("the named remedy did not clear the gate: %v", rep.Failures)
+	}
+}
+
+// A task PR may touch no receipt but its own. The hashed diff excludes
+// receipts/**, so purity has to run over the full changed-file list or this
+// laundering path is invisible to every gate.
+func TestVerifyRejectsForeignReceiptInTaskPR(t *testing.T) {
+	f := newFixture(t)
+	f.write("README.md", "hi\n")
+	f.commitAll("init")
+	f.planAndBranch("os-aaaa")
+	f.write("src/thing.txt", "done\n")
+	f.commitAll("implement")
+	f.generateAndCommitReceipt("os-aaaa")
+	f.write("receipts/os-victim.json", `{"schema_version":"2.0","task":"os-victim"}`+"\n")
+	f.commitAll("smuggle another task's receipt")
+
+	rep := f.verify("os-aaaa")
+	if rep.OK || !failuresContain(rep, "may touch no receipt but its own") {
+		t.Fatalf("foreign receipt not caught: ok=%v failures=%v", rep.OK, rep.Failures)
+	}
+}
+
+// Schema 1.0 receipts predate the split and stay readable: their durable
+// fields are a subset, and migrate rewrites them in place.
+func TestReadsSchema1AndMigrates(t *testing.T) {
+	f := newFixture(t)
+	f.write("README.md", "hi\n")
+	f.commitAll("init")
+	f.planAndBranch("os-bbbb")
+	f.write("src/thing.txt", "done\n")
+	f.commitAll("implement")
+
+	r, err := Generate(f.repo, "os-bbbb", "main", Options{RunValidation: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !rep.OK {
-		t.Fatalf("post-overwrite verify failed: %v", rep.Failures)
+	// The 1.0 shape: the snapshot inline, the commands only as results.
+	legacy := map[string]any{
+		"schema_version": "1.0",
+		"task":           "os-bbbb",
+		"merge_base":     r.MergeBase,
+		"head":           r.Head,
+		"plan_path":      r.PlanPath,
+		"plan_sha256":    r.PlanSHA256,
+		"diff_files":     r.DiffFiles,
+		"diff_sha256":    r.DiffSHA256,
+		"validation":     []map[string]any{{"cmd": "true", "exit": 0}},
+		"generated_by":   "local",
+	}
+	b, _ := json.MarshalIndent(legacy, "", "  ")
+	f.write("receipts/os-bbbb.json", string(b)+"\n")
+	f.commitAll("legacy receipt")
+
+	if rep := f.verify("os-bbbb"); !rep.OK {
+		t.Fatalf("a 1.0 receipt was rejected: %v", rep.Failures)
+	}
+
+	p := Path(f.dir, "os-bbbb")
+	changed, err := Migrate(p)
+	if err != nil || !changed {
+		t.Fatalf("migrate: changed=%v err=%v", changed, err)
+	}
+	c, err := ReadClaim(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.SchemaVersion != SchemaVersion || !slices.Equal(c.ValidationCommands, []string{"true"}) {
+		t.Fatalf("migrated claim = %+v", c)
+	}
+	if raw, _ := os.ReadFile(p); strings.Contains(string(raw), "diff_sha256") {
+		t.Fatal("the migrated file still carries the snapshot")
+	}
+	if again, err := Migrate(p); err != nil || again {
+		t.Fatalf("migrate is not idempotent: changed=%v err=%v", again, err)
+	}
+}
+
+// The attestation is what CI emits per run: the claim plus the snapshot it
+// verified against, written whether the gate passed or not.
+func TestAttestationCarriesTheVerifiedSnapshot(t *testing.T) {
+	f := newFixture(t)
+	f.write("README.md", "hi\n")
+	f.commitAll("init")
+	f.planAndBranch("os-cccc")
+	f.write("src/thing.txt", "done\n")
+	f.commitAll("implement")
+	f.generateAndCommitReceipt("os-cccc")
+
+	rep, err := Verify(f.repo, "os-cccc", "main", "seed/os-cccc", Options{RunValidation: true, VerifiedBy: "ci:run/1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "attestation.json")
+	if err := rep.Regenerated.WriteAttestation(out); err != nil {
+		t.Fatal(err)
+	}
+	var got Receipt
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.MergeBase == "" || got.DiffSHA256 == "" || got.VerifiedBy != "ci:run/1" {
+		t.Fatalf("attestation = %+v", got)
+	}
+	if !slices.Equal(got.DiffFiles, []string{"src/thing.txt"}) {
+		t.Fatalf("diff files = %v", got.DiffFiles)
+	}
+	// The committed claim carries none of it.
+	if raw, _ := os.ReadFile(Path(f.dir, "os-cccc")); strings.Contains(string(raw), "merge_base") {
+		t.Fatal("the committed claim carries the snapshot")
 	}
 }
 
@@ -247,8 +435,9 @@ func TestGenerateRequiresMergeBasePlan(t *testing.T) {
 	f.git("checkout", "-q", "-b", "seed/os-5555")
 	f.write("src/thing.txt", "rogue\n")
 	f.commitAll("rogue work")
-	if _, err := Generate(f.repo, "os-5555", "main", Options{}); err == nil ||
-		!strings.Contains(err.Error(), "no approved plan at merge-base") {
+	_, err := Generate(f.repo, "os-5555", "main", Options{})
+	var pe *PlanError
+	if !errors.As(err, &pe) || !strings.Contains(err.Error(), "no approved plan") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -268,7 +457,9 @@ func TestVerifyFailsOnRedValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.WriteFile(f.dir)
+	if err := r.WriteClaim(f.dir); err != nil {
+		t.Fatal(err)
+	}
 	f.commitAll("receipt")
 
 	rep, err := Verify(f.repo, "os-6666", "main", "seed/os-6666", Options{RunValidation: true})
@@ -290,21 +481,37 @@ func TestVerifyRefusesNonTaskBranch(t *testing.T) {
 	}
 }
 
-func TestSameCommandsAndWriteFile(t *testing.T) {
-	a := []Validation{{Cmd: "x"}, {Cmd: "y"}}
-	if !sameCommands(a, []Validation{{Cmd: "x"}, {Cmd: "y"}}) {
-		t.Fatal("equal command sets differ")
+func TestClaimComparisonAndWriteClaim(t *testing.T) {
+	want := Claim{Task: "os-t", PlanPath: "plans/os-t.md", PlanSHA256: "abc", ValidationCommands: []string{"x", "y"}}
+	if d := want.Differs(want); d != "" {
+		t.Fatalf("a claim differs from itself: %s", d)
 	}
-	if sameCommands(a, []Validation{{Cmd: "x"}}) || sameCommands(a, []Validation{{Cmd: "x"}, {Cmd: "z"}}) {
-		t.Fatal("unequal command sets matched")
+	for _, tc := range []struct {
+		name string
+		got  Claim
+		want string
+	}{
+		{"task", Claim{Task: "os-other"}, "not \"os-t\""},
+		{"plan path", Claim{Task: "os-t", PlanPath: "plans/other.md"}, "plan path"},
+		{"plan pin", Claim{Task: "os-t", PlanPath: "plans/os-t.md", PlanSHA256: "def"}, "plan pin"},
+		{"commands", Claim{Task: "os-t", PlanPath: "plans/os-t.md", PlanSHA256: "abc", ValidationCommands: []string{"x"}}, "validation commands"},
+	} {
+		if d := tc.got.Differs(want); !strings.Contains(d, tc.want) {
+			t.Fatalf("%s: %q does not mention %q", tc.name, d, tc.want)
+		}
 	}
-	r := &Receipt{SchemaVersion: "1.0", Task: "os-t"}
+
+	r := &Receipt{Claim: Claim{SchemaVersion: SchemaVersion, Task: "os-t"}, DiffSHA256: "deadbeef"}
 	root := t.TempDir()
-	if err := r.WriteFile(root); err != nil {
+	if err := r.WriteClaim(root); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(Path(root, "os-t")); err != nil {
+	b, err := os.ReadFile(Path(root, "os-t"))
+	if err != nil {
 		t.Fatal("receipt not written")
+	}
+	if strings.Contains(string(b), "deadbeef") {
+		t.Fatal("WriteClaim wrote the snapshot")
 	}
 }
 

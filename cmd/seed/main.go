@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -110,6 +111,8 @@ commands:
   pr classify <branch> [--files a,b,c]   classify a PR + check purity (D3)
   receipt generate <task> --base <ref> [--run] [--by <name>] [--write]
   receipt verify <task> --base <ref> --branch <head-branch> [--run] [--write]
+                               [--emit <path>] [--by <ci-run>]
+  receipt migrate <task>|--all rewrite committed receipts in the current schema
   validate                     lint guardrails, teams, role variants, plans
   backend verify <name>        manifest + lock-hash check for a backend plugin
   sync [--check]               regenerate fan-outs (.claude/agents|skills,
@@ -564,15 +567,22 @@ func runReceipt(args []string, stdout, stderr *os.File) int {
 		usage(stderr)
 		return exitUsage
 	}
-	sub, taskID := args[0], args[1]
+	// `receipt migrate --all` names no task, so the id is optional when the
+	// next argument is already a flag.
+	sub, taskID, rest := args[0], "", args[1:]
+	if !strings.HasPrefix(args[1], "-") {
+		taskID, rest = args[1], args[2:]
+	}
 	fs := flag.NewFlagSet("receipt "+sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	base := fs.String("base", "main", "base ref (the default branch)")
 	branch := fs.String("branch", "", "PR head branch (verify)")
 	runVal := fs.Bool("run", false, "execute the merge-base plan's validation commands")
-	write := fs.Bool("write", false, "write the regenerated receipt to receipts/<task>.json")
+	write := fs.Bool("write", false, "write the regenerated claim to receipts/<task>.json")
+	emit := fs.String("emit", "", "write the full attestation (claim + verified snapshot) to this path")
+	all := fs.Bool("all", false, "migrate: every receipt under receipts/")
 	by := fs.String("by", "local", "generated_by identity")
-	if fs.Parse(args[2:]) != nil {
+	if fs.Parse(rest) != nil {
 		return exitUsage
 	}
 	cwd, _ := os.Getwd()
@@ -584,6 +594,8 @@ func runReceipt(args []string, stdout, stderr *os.File) int {
 	opts := receipt.Options{RunValidation: *runVal, GeneratedBy: *by}
 
 	switch sub {
+	case "migrate":
+		return runReceiptMigrate(root, taskID, *all, stdout, stderr)
 	case "generate":
 		r, err := receipt.Generate(repo, taskID, *base, opts)
 		if err != nil {
@@ -591,7 +603,7 @@ func runReceipt(args []string, stdout, stderr *os.File) int {
 			return 1
 		}
 		if *write {
-			if err := r.WriteFile(root); err != nil {
+			if err := r.WriteClaim(root); err != nil {
 				fmt.Fprintln(stderr, "seed receipt generate:", err)
 				return 1
 			}
@@ -604,15 +616,26 @@ func runReceipt(args []string, stdout, stderr *os.File) int {
 			fmt.Fprintln(stderr, "seed receipt verify: --branch required (the PR head branch; merge-queue callers derive it from the PR, never the merge-group ref)")
 			return exitUsage
 		}
+		opts.VerifiedBy = *by
 		rep, err := receipt.Verify(repo, taskID, *base, *branch, opts)
 		if err != nil {
 			fmt.Fprintln(stderr, "seed receipt verify:", err)
 			return 1
 		}
-		if *write && rep.Regenerated != nil {
-			if err := rep.Regenerated.WriteFile(root); err != nil {
-				fmt.Fprintln(stderr, "seed receipt verify:", err)
-				return 1
+		// The attestation is emitted whether or not the gate passed: a red
+		// run must still say what it verified against.
+		if rep.Regenerated != nil {
+			if *write {
+				if err := rep.Regenerated.WriteClaim(root); err != nil {
+					fmt.Fprintln(stderr, "seed receipt verify:", err)
+					return 1
+				}
+			}
+			if *emit != "" {
+				if err := rep.Regenerated.WriteAttestation(*emit); err != nil {
+					fmt.Fprintln(stderr, "seed receipt verify:", err)
+					return 1
+				}
 			}
 		}
 		if !rep.OK {
@@ -628,6 +651,46 @@ func runReceipt(args []string, stdout, stderr *os.File) int {
 		usage(stderr)
 		return exitUsage
 	}
+}
+
+// runReceiptMigrate rewrites committed receipts in the current schema,
+// dropping the merge base, head and diff a 1.0 file carried inline. Those
+// fields described the branch at one instant and were re-verified from git on
+// every run anyway; the file that remains is the durable claim.
+func runReceiptMigrate(root, taskID string, all bool, stdout, stderr *os.File) int {
+	var paths []string
+	switch {
+	case all && taskID != "":
+		fmt.Fprintln(stderr, "seed receipt migrate: pass a task id or --all, not both")
+		return exitUsage
+	case all:
+		matches, err := filepath.Glob(filepath.Join(root, "receipts", "*.json"))
+		if err != nil {
+			fmt.Fprintln(stderr, "seed receipt migrate:", err)
+			return 1
+		}
+		sort.Strings(matches)
+		paths = matches
+	case taskID != "":
+		paths = []string{receipt.Path(root, taskID)}
+	default:
+		fmt.Fprintln(stderr, "seed receipt migrate: pass a task id or --all")
+		return exitUsage
+	}
+	migrated := 0
+	for _, p := range paths {
+		changed, err := receipt.Migrate(p)
+		if err != nil {
+			fmt.Fprintln(stderr, "seed receipt migrate:", err)
+			return 1
+		}
+		if changed {
+			migrated++
+			fmt.Fprintln(stdout, "migrated", filepath.Base(p))
+		}
+	}
+	fmt.Fprintf(stdout, "migrate: %d of %d receipts rewritten at schema %s\n", migrated, len(paths), receipt.SchemaVersion)
+	return 0
 }
 
 func runValidate(stdout, stderr *os.File) int {

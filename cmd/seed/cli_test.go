@@ -500,6 +500,39 @@ func TestCLIReceiptFlow(t *testing.T) {
 	if code, _, _ = seedRun(t, "receipt", "generate", "os-nope", "--base", "main"); code != 1 {
 		t.Fatal("planless generate not refused")
 	}
+	// --emit writes the attestation CI uploads: the claim plus the snapshot
+	// it verified, which the committed file deliberately no longer carries.
+	att := filepath.Join(t.TempDir(), "attestation.json")
+	code, out, errS = seedRun(t, "receipt", "verify", "os-feedbeef", "--base", "main",
+		"--branch", "seed/os-feedbeef", "--run", "--emit", att, "--by", "ci:run/7")
+	if code != 0 {
+		t.Fatalf("receipt verify --emit: %d %s %s", code, out, errS)
+	}
+	b, err := os.ReadFile(att)
+	if err != nil {
+		t.Fatalf("attestation not emitted: %v", err)
+	}
+	for _, want := range []string{"merge_base", "diff_sha256", "changed_files", "ci:run/7"} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("attestation missing %q: %s", want, b)
+		}
+	}
+	if committed, _ := os.ReadFile(filepath.Join(root, "receipts", "os-feedbeef.json")); strings.Contains(string(committed), "merge_base") {
+		t.Fatalf("the committed receipt carries the snapshot: %s", committed)
+	}
+
+	// migrate is addressed by task or --all, and is a no-op at the current
+	// schema.
+	if code, out, errS = seedRun(t, "receipt", "migrate", "--all"); code != 0 || !strings.Contains(out, "0 of 1") {
+		t.Fatalf("receipt migrate --all: %d %s %s", code, out, errS)
+	}
+	if code, _, _ = seedRun(t, "receipt", "migrate", "os-feedbeef", "--all"); code != exitUsage {
+		t.Fatal("receipt migrate with both a task and --all not usage")
+	}
+	if code, _, _ = seedRun(t, "receipt", "migrate"); code != exitUsage {
+		t.Fatal("targetless receipt migrate not usage")
+	}
+
 	if code, _, _ = seedRun(t, "receipt", "bogus", "os-feedbeef"); code != exitUsage {
 		t.Fatal("receipt bogus not usage")
 	}
