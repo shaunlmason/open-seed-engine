@@ -533,6 +533,21 @@ func TestCLIReceiptFlow(t *testing.T) {
 		t.Fatal("targetless receipt migrate not usage")
 	}
 
+	// A task id names one file under receipts/, and an attestation never
+	// belongs in that directory: both refusals happen before any git work.
+	for _, bad := range []string{"../../settings", "a/b", ".."} {
+		if code, _, errS = seedRun(t, "receipt", "migrate", bad); code != exitUsage {
+			t.Fatalf("receipt migrate %q not usage: %d %s", bad, code, errS)
+		}
+		if code, _, _ = seedRun(t, "receipt", "generate", bad, "--base", "main", "--write"); code != exitUsage {
+			t.Fatalf("receipt generate %q not usage", bad)
+		}
+	}
+	if code, _, errS = seedRun(t, "receipt", "verify", "os-feedbeef", "--base", "main",
+		"--branch", "seed/os-feedbeef", "--emit", filepath.Join(root, "receipts", "os-feedbeef.json")); code != exitUsage {
+		t.Fatalf("emitting the attestation into receipts/ not usage: %d %s", code, errS)
+	}
+
 	if code, _, _ = seedRun(t, "receipt", "bogus", "os-feedbeef"); code != exitUsage {
 		t.Fatal("receipt bogus not usage")
 	}

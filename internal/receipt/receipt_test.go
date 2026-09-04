@@ -552,3 +552,95 @@ func TestDiffHashIsIndependentOfTheCloneAbbreviation(t *testing.T) {
 		t.Fatalf("the hashed diff does not carry full blob ids:\n%s", out)
 	}
 }
+
+// A receipt whose schema this engine does not know is refused, not guessed
+// at. Silently relabelling one as current would let migrate discard fields
+// it never understood, and let verify weigh a shape it cannot read.
+func TestUnsupportedSchemaVersionRefused(t *testing.T) {
+	f := newFixture(t)
+	f.write("README.md", "hi\n")
+	f.commitAll("init")
+	f.planAndBranch("os-dddd")
+	f.write("src/thing.txt", "done\n")
+	f.commitAll("implement")
+	f.generateAndCommitReceipt("os-dddd")
+
+	p := Path(f.dir, "os-dddd")
+	good, _ := os.ReadFile(p)
+	for _, version := range []string{`"9.9"`, `""`, `null`} {
+		os.WriteFile(p, []byte(strings.Replace(string(good), `"2.0"`, version, 1)), 0o644)
+		if _, err := ReadClaim(p); err == nil || !strings.Contains(err.Error(), "unsupported receipt schema_version") {
+			t.Fatalf("schema_version %s accepted: %v", version, err)
+		}
+		if _, err := Migrate(p); err == nil {
+			t.Fatalf("migrate relabelled schema_version %s", version)
+		}
+	}
+	// A receipt with no schema_version at all is the same refusal.
+	os.WriteFile(p, []byte(`{"task":"os-dddd","plan_sha256":"x"}`+"\n"), 0o644)
+	if _, err := ReadClaim(p); err == nil {
+		t.Fatal("a receipt with no schema_version was accepted")
+	}
+}
+
+// An attestation committed where a claim belongs is refused on read, however
+// it got there: it declares the current schema and carries the durable fields,
+// so nothing else would notice that its snapshot went stale on the next push.
+func TestCommittedAttestationRefused(t *testing.T) {
+	f := newFixture(t)
+	f.write("README.md", "hi\n")
+	f.commitAll("init")
+	f.planAndBranch("os-eeee")
+	f.write("src/thing.txt", "done\n")
+	f.commitAll("implement")
+
+	r, err := Generate(f.repo, "os-eeee", "main", Options{RunValidation: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.WriteAttestation(Path(f.dir, "os-eeee")); err != nil {
+		t.Fatal(err)
+	}
+	f.commitAll("commit the attestation as if it were a claim")
+
+	if _, err := ReadClaim(Path(f.dir, "os-eeee")); err == nil ||
+		!strings.Contains(err.Error(), "attestation, not a claim") {
+		t.Fatalf("committed attestation accepted: %v", err)
+	}
+	rep := f.verify("os-eeee")
+	if rep.OK || !failuresContain(rep, "attestation, not a claim") {
+		t.Fatalf("verify accepted a committed attestation: ok=%v failures=%v", rep.OK, rep.Failures)
+	}
+}
+
+// A task id names one file under receipts/. An id that is a path would let
+// --write or migrate rewrite a file outside the directory entirely.
+func TestValidTaskIDConfinesWritesToReceipts(t *testing.T) {
+	for _, bad := range []string{"", "..", "../../settings", "a/b", `a\b`, ".hidden", "os-1111/../../x"} {
+		if err := ValidTaskID(bad); err == nil {
+			t.Errorf("ValidTaskID(%q) accepted", bad)
+		}
+	}
+	for _, good := range []string{"os-1111", "os-feedbeef", "task_1", "a-b.c"} {
+		if err := ValidTaskID(good); err != nil {
+			t.Errorf("ValidTaskID(%q) rejected: %v", good, err)
+		}
+	}
+
+	root := t.TempDir()
+	if !UnderReceipts(root, filepath.Join(root, "receipts", "os-1.json")) {
+		t.Error("a path in receipts/ read as outside it")
+	}
+	if !UnderReceipts(root, filepath.Join(root, "receipts", "nested", "x.json")) {
+		t.Error("a nested path in receipts/ read as outside it")
+	}
+	for _, outside := range []string{
+		filepath.Join(root, "attestation.json"),
+		filepath.Join(root, "receipts.json"),
+		filepath.Join(root, "receipts", "..", "x.json"),
+	} {
+		if UnderReceipts(root, outside) {
+			t.Errorf("UnderReceipts(%q) said inside", outside)
+		}
+	}
+}

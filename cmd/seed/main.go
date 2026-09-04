@@ -590,6 +590,18 @@ func runReceipt(args []string, stdout, stderr *os.File) int {
 	if !found {
 		root = cwd
 	}
+	if taskID != "" {
+		if err := receipt.ValidTaskID(taskID); err != nil {
+			fmt.Fprintln(stderr, "seed receipt "+sub+":", err)
+			return exitUsage
+		}
+	}
+	// The attestation is a per-run finding, not tree content: emitting one
+	// into receipts/ would leave a file that reads as a claim.
+	if *emit != "" && receipt.UnderReceipts(root, *emit) {
+		fmt.Fprintln(stderr, "seed receipt "+sub+": refusing to emit the attestation into receipts/ — that directory holds committed claims, and an attestation is stale the moment it lands there")
+		return exitUsage
+	}
 	repo := &gitx.Repo{Dir: root}
 	opts := receipt.Options{RunValidation: *runVal, GeneratedBy: *by}
 
