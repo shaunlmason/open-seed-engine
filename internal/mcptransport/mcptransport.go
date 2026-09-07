@@ -127,6 +127,14 @@ func Tools() []Tool {
 			handler: func(sv *task.Service, a args) *task.Result {
 				return sv.RecordEvidence(a.get("task"), a.get("actor"), a.get("resolution"), a.get("no_pr") == "true")
 			}},
+		{Name: "task_exempt_plan",
+			Description: "Record that a done card required no plan of its own (operator; D3/D7, for an L1 card or one whose deliverable was another card's plan)",
+			InputSchema: schema([]string{"task", "actor", "reason"}, map[string]any{
+				"task": str("task id"), "actor": str("operator identity"),
+				"reason": str("why this card required no plan; kept verbatim on the card")}),
+			handler: func(sv *task.Service, a args) *task.Result {
+				return sv.ExemptPlan(a.get("task"), a.get("actor"), a.get("reason"))
+			}},
 		{Name: "task_comment", Description: "Append a comment (fenced while the card holds a claim); returns comment_id",
 			InputSchema: schema([]string{"task", "actor", "body"}, map[string]any{
 				"task": str("task id"), "actor": str("acting identity"), "body": str("comment text"), "token": str("claim token if the card is claimed")}),

@@ -599,6 +599,49 @@ func (sv *Service) LeaseRenew(id, actor, token, lease string) *Result {
 // repository. The companion half of this change refuses that accept at the
 // door, so this verb is the repair for cards created before the refusal
 // existed rather than a routine part of the loop.
+// ExemptPlan records an operator's judgment that a done card required no
+// plan of its own, so the D3/D7 done lint stops asking for one. It exists
+// because `done` is terminal: a card accepted without the no-PR exemption
+// and without a plan can be repaired by no transition, and before this
+// verb the only remedy was rewriting the store. The reason is required
+// and kept verbatim, because an exemption nobody has to justify is an
+// exemption that erases the rule.
+func (sv *Service) ExemptPlan(id, actor, reason string) *Result {
+	if !sv.Cfg.IsOperator(actor) {
+		return failure(spec.ExitInvalid, "operator_required", nil)
+	}
+	if strings.TrimSpace(reason) == "" {
+		return failure(spec.ExitInvalid, "reason_required", nil)
+	}
+	_, err := sv.Store.Mutate(true, func(head string) (*stateref.Mutation, error) {
+		c, err := sv.loadCard(head, id)
+		if err != nil {
+			return nil, err
+		}
+		if c.Review == nil || c.Review.Outcome != "accepted" {
+			return nil, &stateref.Terminal{Code: spec.ExitInvalid, Name: "no_accepted_review"}
+		}
+		if c.Review.PlanExempt != "" {
+			return nil, &stateref.Terminal{Code: spec.ExitInvalid, Name: "plan_exemption_already_recorded"}
+		}
+		c.Review.PlanExempt = reason
+		c.UpdatedAt = sv.now()
+		content, err := c.Serialize()
+		if err != nil {
+			return nil, err
+		}
+		return &stateref.Mutation{
+			Message: "exempt-plan " + id,
+			Changes: []gitx.Change{{Path: card.Path(id), Content: content}},
+			Events:  []string{sv.event(actor, "exempt-plan", id, map[string]any{"reason": reason})},
+		}, nil
+	})
+	if err != nil {
+		return errResult(err)
+	}
+	return ok(map[string]any{"verb": "exempt-plan", "task": id, "plan_exempt": reason})
+}
+
 func (sv *Service) RecordEvidence(id, actor, resolution string, noPR bool) *Result {
 	if !sv.Cfg.IsOperator(actor) {
 		return failure(spec.ExitInvalid, "operator_required", nil)

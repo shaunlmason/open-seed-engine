@@ -122,12 +122,34 @@ func (sv *Service) lintDone(c *card.Card) []string {
 	if !sv.Cfg.IsOperator(c.Review.Reviewer) {
 		failures = append(failures, c.ID+": done accepted by "+c.Review.Reviewer+", not in the operator roster — forged accept (D7)")
 	}
-	if !strings.HasPrefix(c.Review.Evidence, "no-pr:") {
-		if _, err := os.Stat(filepath.Join(sv.Root, "plans", c.ID+".md")); err != nil {
-			failures = append(failures, c.ID+": done without a resolvable plan at plans/"+c.ID+".md and without the no-PR exemption (D3/D7)")
-		}
+	if !strings.HasPrefix(c.Review.Evidence, "no-pr:") && c.Review.PlanExempt == "" && !sv.planResolves(c.ID) {
+		failures = append(failures, c.ID+": done without a resolvable plan at plans/"+c.ID+".md, without the no-PR exemption and without an operator plan exemption (D3/D7)")
 	}
 	return failures
+}
+
+// planResolves answers whether this card ever had an approved plan, and
+// answers it from the REPOSITORY rather than from the checkout. The
+// working tree is a per-clone, per-branch fact: an agent sitting on a
+// branch cut before a plan merged would otherwise fail the lint for
+// every card planned since, and with --halt-on-fail one stale clone
+// halts the ref for everyone. What the lint means to ask is whether the
+// plan was ever committed, so it asks git that, and falls back to the
+// working tree for a repo with no git history at all (a fresh fixture).
+func (sv *Service) planResolves(id string) bool {
+	path := filepath.Join("plans", id+".md")
+	if _, err := os.Stat(filepath.Join(sv.Root, path)); err == nil {
+		return true
+	}
+	// The plan lives in the code repository at Root whatever backend
+	// holds the cards, so the probe is the repository's, not the store's.
+	// Any commit on any ref that touched the path counts: merged on the
+	// default branch, or on a fetched branch whose plan PR is not merged
+	// yet. A shallow clone can truncate this; the halt is then the
+	// operator's to resume, and CI clones the full history.
+	repo := &gitx.Repo{Dir: sv.Root}
+	out, err := repo.Git("rev-list", "--max-count=1", "--all", "--", path)
+	return err == nil && strings.TrimSpace(out) != ""
 }
 
 // replay walks the state ref's history (bounded) and checks every card state

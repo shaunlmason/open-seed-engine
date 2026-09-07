@@ -79,6 +79,9 @@
   "operator_verbs_outside_table": {
     "record-evidence": {
       "notes": "Completes an accept that recorded no evidence: legal only when the review block is accepted and its evidence is empty, so an attestation can never be overwritten or fabricated. It is not a field-set verb and `done` stays terminal: no transition could express this, because the validator refuses every outgoing edge from a terminal state."
+    },
+    "exempt-plan": {
+      "notes": "Records that a done card required no plan of its own (a card at L1, or one whose whole deliverable was another card's plan), so the D3/D7 done lint stops asking for plans/<id>.md. Operator-only, legal only on an accepted review block, the reason required and kept verbatim, and refused once recorded. Like record-evidence it is not a field-set verb and `done` stays terminal: no transition could express it, because the validator refuses every outgoing edge from a terminal state."
     }
   },
   "worker_verbs_outside_table": {
