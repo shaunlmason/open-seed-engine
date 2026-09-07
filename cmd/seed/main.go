@@ -183,6 +183,10 @@ commands:
     accept|reject|cancel|promote|deprioritize|block|unblock|reinstate|close <id>
            --actor A [--resolution MSG] [--blocked-on entry] [--no-pr]
     record-evidence <id> --actor A --resolution URL [--no-pr]
+    exempt-plan <id> --actor A --reason TEXT   record that a done card
+                                 required no plan of its own (operator;
+                                 D3/D7, for an L1 card or one whose whole
+                                 deliverable was another card's plan)
                                  complete an accept that recorded none
                                  (operator; only when the review block is
                                  accepted and its evidence is empty)
@@ -433,6 +437,7 @@ func runTask(args []string, stdout, stderr *os.File) int {
 	to := fs.String("to", "", "")
 	blockedOn := fs.String("blocked-on", "", "")
 	resolution := fs.String("resolution", "", "")
+	reason := fs.String("reason", "", "")
 	state := fs.String("state", "", "")
 	kind := fs.String("kind", "", "")
 	ref := fs.String("ref", "", "")
@@ -476,6 +481,8 @@ func runTask(args []string, stdout, stderr *os.File) int {
 			return sv.LeaseRenew(id, *actor, *token, *lease)
 		case "record-evidence":
 			return sv.RecordEvidence(id, *actor, *resolution, *noPR)
+		case "exempt-plan":
+			return sv.ExemptPlan(id, *actor, *reason)
 		default:
 			if operatorVerbs[verb] {
 				return sv.Transition(task.TransitionArgs{Verb: verb, ID: id, To: *to,

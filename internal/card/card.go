@@ -25,6 +25,12 @@ type Review struct {
 	ReviewedAt string `yaml:"reviewed_at,omitempty" json:"reviewed_at,omitempty"`
 	Outcome    string `yaml:"outcome,omitempty" json:"outcome,omitempty"`
 	Evidence   string `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+	// PlanExempt is the operator's stated reason that this card required
+	// no plan of its own: a card at L1, or one whose whole deliverable
+	// was another card's plan. Empty means the D3 plan requirement
+	// applies. Only an operator can write it, and only on a done card,
+	// which is why it is not a field an implementer can set.
+	PlanExempt string `yaml:"plan_exempt,omitempty" json:"plan_exempt,omitempty"`
 }
 
 type Links struct {

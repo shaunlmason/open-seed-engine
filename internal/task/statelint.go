@@ -122,12 +122,52 @@ func (sv *Service) lintDone(c *card.Card) []string {
 	if !sv.Cfg.IsOperator(c.Review.Reviewer) {
 		failures = append(failures, c.ID+": done accepted by "+c.Review.Reviewer+", not in the operator roster — forged accept (D7)")
 	}
-	if !strings.HasPrefix(c.Review.Evidence, "no-pr:") {
-		if _, err := os.Stat(filepath.Join(sv.Root, "plans", c.ID+".md")); err != nil {
-			failures = append(failures, c.ID+": done without a resolvable plan at plans/"+c.ID+".md and without the no-PR exemption (D3/D7)")
-		}
+	if !strings.HasPrefix(c.Review.Evidence, "no-pr:") && c.Review.PlanExempt == "" && !sv.planResolves(c.ID) {
+		failures = append(failures, c.ID+": done without a resolvable plan at plans/"+c.ID+".md, without the no-PR exemption and without an operator plan exemption (D3/D7)")
 	}
 	return failures
+}
+
+// planResolves answers whether this card has an approved plan, and asks
+// the DEFAULT BRANCH rather than the checkout. The working tree is a
+// per-clone, per-branch fact: an agent sitting on a branch cut before a
+// plan merged would otherwise fail the lint for every card planned
+// since, and with --halt-on-fail one stale clone halts the ref for
+// everyone. The plan lives in the code repository at Root whatever
+// backend holds the cards, so the probe is the repository's, not the
+// store's.
+//
+// It asks whether the path EXISTS on the default branch now, not
+// whether some commit once touched it: a plan on an unmerged branch has
+// not passed its own PR gate, and counting it would let an unplanned
+// card satisfy D3. A clone that has not fetched since the plan merged
+// still answers no, and the halt is then the operator's to resume.
+func (sv *Service) planResolves(id string) bool {
+	rel := "plans/" + id + ".md"
+	if _, err := os.Stat(filepath.Join(sv.Root, filepath.FromSlash(rel))); err == nil {
+		return true
+	}
+	repo := &gitx.Repo{Dir: sv.Root}
+	for _, ref := range defaultBranchRefs(repo) {
+		if _, err := repo.Git("cat-file", "-e", ref+":"+rel); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// defaultBranchRefs names the refs that can carry an APPROVED plan, in
+// order: the remote's own default branch, then the conventional names.
+// HEAD and feature branches are deliberately absent, since a plan that
+// has not reached the default branch has not passed its plan PR.
+func defaultBranchRefs(repo *gitx.Repo) []string {
+	var refs []string
+	if out, err := repo.Git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
+		if named := strings.TrimSpace(out); named != "" {
+			refs = append(refs, named)
+		}
+	}
+	return append(refs, "origin/main", "origin/master", "main", "master")
 }
 
 // replay walks the state ref's history (bounded) and checks every card state
