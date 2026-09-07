@@ -54,7 +54,8 @@
         "reviewer": {"type": "string", "description": "Operator identity; for no-PR closes, the server-attributed dispatch actor (D7)"},
         "reviewed_at": {"type": "string", "format": "date-time"},
         "outcome": {"enum": ["accepted", "rejected"]},
-        "evidence": {"type": "string", "description": "Merged PR URL, or for no-PR closes the dispatch-run/comment URL that is the card's evidence record (D7 exemption)"}
+        "evidence": {"type": "string", "description": "Merged PR URL, or for no-PR closes the dispatch-run/comment URL that is the card's evidence record (D7 exemption)"},
+        "plan_exempt": {"type": "string", "description": "Operator's stated reason that this card required no plan of its own, so the D3/D7 done lint stops asking for plans/<id>.md: a card at L1, or one whose whole deliverable was another card's plan (exempt-plan)"}
       },
       "additionalProperties": false
     },

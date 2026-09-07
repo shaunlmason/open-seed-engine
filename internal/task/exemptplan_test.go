@@ -119,3 +119,43 @@ func TestPlanResolvesFromGitNotTheCheckout(t *testing.T) {
 		t.Fatal("a plan committed but absent from this checkout must still resolve: a stale clone must never halt the shared ref")
 	}
 }
+
+// The other half of asking git: only the DEFAULT BRANCH counts. A plan
+// sitting on an unmerged branch has not passed its own plan PR, so a
+// card whose plan never merged must still fail D3. A resolver that
+// accepted any ref (git rev-list --all) passes this card and lets an
+// unplanned card through, which is the loophole the narrower query
+// closes.
+func TestPlanOnAnUnmergedBranchDoesNotSatisfyD3(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "repo")
+	mustGit(t, "", "init", "--initial-branch=main", dir)
+	sv := fastService(t, dir)
+	mustOK(t, sv.Init())
+	id := doneWithoutAPlan(t, sv)
+
+	// main needs a commit before a branch can leave it.
+	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commit := func(msg string) {
+		t.Helper()
+		mustGit(t, dir, "add", "-A")
+		mustGit(t, dir, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-m", msg)
+	}
+	commit("base")
+
+	mustGit(t, dir, "checkout", "-q", "-b", "seed/"+id+"-plan")
+	plans := filepath.Join(dir, "plans")
+	if err := os.MkdirAll(plans, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plans, id+".md"), []byte("# plan\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commit("plan on a branch nobody merged")
+	mustGit(t, dir, "checkout", "-q", "main")
+
+	if !lintFails(t, sv, id) {
+		t.Fatal("a plan that never reached the default branch must not satisfy D3")
+	}
+}

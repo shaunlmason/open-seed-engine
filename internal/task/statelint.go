@@ -128,28 +128,46 @@ func (sv *Service) lintDone(c *card.Card) []string {
 	return failures
 }
 
-// planResolves answers whether this card ever had an approved plan, and
-// answers it from the REPOSITORY rather than from the checkout. The
-// working tree is a per-clone, per-branch fact: an agent sitting on a
-// branch cut before a plan merged would otherwise fail the lint for
-// every card planned since, and with --halt-on-fail one stale clone
-// halts the ref for everyone. What the lint means to ask is whether the
-// plan was ever committed, so it asks git that, and falls back to the
-// working tree for a repo with no git history at all (a fresh fixture).
+// planResolves answers whether this card has an approved plan, and asks
+// the DEFAULT BRANCH rather than the checkout. The working tree is a
+// per-clone, per-branch fact: an agent sitting on a branch cut before a
+// plan merged would otherwise fail the lint for every card planned
+// since, and with --halt-on-fail one stale clone halts the ref for
+// everyone. The plan lives in the code repository at Root whatever
+// backend holds the cards, so the probe is the repository's, not the
+// store's.
+//
+// It asks whether the path EXISTS on the default branch now, not
+// whether some commit once touched it: a plan on an unmerged branch has
+// not passed its own PR gate, and counting it would let an unplanned
+// card satisfy D3. A clone that has not fetched since the plan merged
+// still answers no, and the halt is then the operator's to resume.
 func (sv *Service) planResolves(id string) bool {
-	path := filepath.Join("plans", id+".md")
-	if _, err := os.Stat(filepath.Join(sv.Root, path)); err == nil {
+	rel := "plans/" + id + ".md"
+	if _, err := os.Stat(filepath.Join(sv.Root, filepath.FromSlash(rel))); err == nil {
 		return true
 	}
-	// The plan lives in the code repository at Root whatever backend
-	// holds the cards, so the probe is the repository's, not the store's.
-	// Any commit on any ref that touched the path counts: merged on the
-	// default branch, or on a fetched branch whose plan PR is not merged
-	// yet. A shallow clone can truncate this; the halt is then the
-	// operator's to resume, and CI clones the full history.
 	repo := &gitx.Repo{Dir: sv.Root}
-	out, err := repo.Git("rev-list", "--max-count=1", "--all", "--", path)
-	return err == nil && strings.TrimSpace(out) != ""
+	for _, ref := range defaultBranchRefs(repo) {
+		if _, err := repo.Git("cat-file", "-e", ref+":"+rel); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// defaultBranchRefs names the refs that can carry an APPROVED plan, in
+// order: the remote's own default branch, then the conventional names.
+// HEAD and feature branches are deliberately absent, since a plan that
+// has not reached the default branch has not passed its plan PR.
+func defaultBranchRefs(repo *gitx.Repo) []string {
+	var refs []string
+	if out, err := repo.Git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
+		if named := strings.TrimSpace(out); named != "" {
+			refs = append(refs, named)
+		}
+	}
+	return append(refs, "origin/main", "origin/master", "main", "master")
 }
 
 // replay walks the state ref's history (bounded) and checks every card state
