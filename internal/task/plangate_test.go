@@ -9,6 +9,8 @@ package task
 // the lint's own rule did not move when the door was added.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -79,6 +81,49 @@ func TestAcceptRefusesPlanlessCloseWithoutExemption(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGateRefusesAPlanOnlyInTheWorktree pins the review finding on #15.
+// planResolves answers the lint, and takes the checkout's word: for a
+// re-runnable check that costs a re-read at worst. The gate cannot take
+// it. A plan written on the accepting branch and never merged would let
+// the card go terminal, and the file then vanishes on the next checkout,
+// leaving exactly the permanently lint-failing card the gate exists to
+// prevent. The gate therefore reads the default-branch refs alone.
+func TestGateRefusesAPlanOnlyInTheWorktree(t *testing.T) {
+	sv := fastService(t, "")
+	mustOK(t, sv.Init())
+	id := reviewReady(t, sv, "plan in the worktree only")
+
+	// Written, not committed: the lint's helper says yes, the gate says no.
+	plans := filepath.Join(sv.Root, "plans")
+	if err := os.MkdirAll(plans, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plans, id+".md"), []byte("# unmerged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !sv.planResolves(id) {
+		t.Fatal("the lint's helper takes the checkout's word")
+	}
+	if sv.planApproved(id) {
+		t.Fatal("an uncommitted plan has passed no PR gate and must not count as approved")
+	}
+	got := sv.Transition(TransitionArgs{Verb: "close", ID: id, Actor: "lead",
+		Resolution: "https://example.invalid/pr/1"})
+	if got.Code == 0 || got.Err != "plan_required" {
+		t.Fatalf("a worktree-only plan must not satisfy the gate: code=%d err=%s", got.Code, got.Err)
+	}
+
+	// Landed on the default branch, it does.
+	mustGit(t, sv.Root, "add", "--", "plans/"+id+".md")
+	mustGit(t, sv.Root, "-c", "user.email=t@example.invalid", "-c", "user.name=t",
+		"commit", "-m", "land the plan")
+	if !sv.planApproved(id) {
+		t.Fatal("a plan on the default branch is approved")
+	}
+	mustOK(t, sv.Transition(TransitionArgs{Verb: "close", ID: id, Actor: "lead",
+		Resolution: "https://example.invalid/pr/1"}))
 }
 
 // TestLintStillRefusesAPlanlessDoneCard pins that the door did not move the

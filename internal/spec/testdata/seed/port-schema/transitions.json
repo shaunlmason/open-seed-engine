@@ -56,7 +56,9 @@
 
     {"from": "review", "to": "done", "verb": "accept", "class": "operator", "effects": ["record_review"],
      "preconditions": [{"name": "resolution_present", "fail_error": "resolution_required", "fail_exit": 3,
-       "fail_detail": "accepting evidences the work: pass --resolution <merged PR URL>, or --no-pr --resolution <artifact URL> for the D7 exemption. A done card with no evidence fails the conformance lint, and done is terminal, so no transition can repair it."}],
+       "fail_detail": "accepting evidences the work: pass --resolution <merged PR URL>, or --no-pr --resolution <artifact URL> for the D7 exemption. A done card with no evidence fails the conformance lint, and done is terminal, so no transition can repair it."},
+      {"name": "plan_or_exemption", "fail_error": "plan_required", "fail_exit": 3,
+       "fail_detail": "this card has no approved plans/<id>.md on the default branch: land its plan first, or accept with --no-pr --resolution <artifact URL> if it legitimately required none (a card whose deliverable was itself a plan PR, work that landed outside a seed/<id> task PR, an L1 card). A done card with neither fails the conformance lint, and done is terminal, so repairing it afterwards costs an operator verb under a halt."}],
      "notes": "Accepting evidences the work: the resolution is the merged PR URL, or the server-attributed artifact URL under the no-pr exemption. A done card carrying no evidence fails the D7 conformance lint, and done is terminal, so no transition can repair it. The requirement belongs here, not in a caller."},
     {"from": "review", "to": "ready", "verb": "reject", "class": "operator",
      "effects": ["append_rejected_author", "record_review"]},

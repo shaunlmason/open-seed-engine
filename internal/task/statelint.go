@@ -143,10 +143,28 @@ func (sv *Service) lintDone(c *card.Card) []string {
 // card satisfy D3. A clone that has not fetched since the plan merged
 // still answers no, and the halt is then the operator's to resume.
 func (sv *Service) planResolves(id string) bool {
-	rel := "plans/" + id + ".md"
-	if _, err := os.Stat(filepath.Join(sv.Root, filepath.FromSlash(rel))); err == nil {
+	if _, err := os.Stat(filepath.Join(sv.Root, filepath.FromSlash("plans/"+id+".md"))); err == nil {
 		return true
 	}
+	return sv.planApproved(id)
+}
+
+// planApproved is the same question with the checkout's own answer left
+// out: does an APPROVED plan exist, on a branch that has passed its own
+// PR gate. The accept edge's plan gate reads this rather than
+// planResolves, and the difference is load-bearing. The lint re-runs, so
+// reading a plan that is merely present in this checkout costs a later
+// re-read at worst. The gate does not: it decides whether a card may
+// become terminal, and `done` is terminal, so a plan that exists only on
+// the accepting worktree would let the card through, vanish on the next
+// checkout, and leave exactly the permanently lint-failing card the gate
+// exists to prevent (review finding on #15).
+//
+// A clone that has not fetched since the plan merged answers no, and the
+// accept then refuses until it fetches. That is the safe direction: the
+// cost is one fetch, against a card nothing can repair.
+func (sv *Service) planApproved(id string) bool {
+	rel := "plans/" + id + ".md"
 	repo := &gitx.Repo{Dir: sv.Root}
 	for _, ref := range defaultBranchRefs(repo) {
 		if _, err := repo.Git("cat-file", "-e", ref+":"+rel); err == nil {

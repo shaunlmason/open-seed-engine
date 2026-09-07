@@ -67,16 +67,15 @@ func stripEvidence(t *testing.T, sv *Service, id string) {
 // tests below are about them rather than about the door.
 func closePlanless(t *testing.T, sv *Service, id, resolution string) {
 	t.Helper()
-	path := writePlan(t, sv, id)
+	writePlan(t, sv, id)
 	mustOK(t, sv.Transition(TransitionArgs{Verb: "close", ID: id, Actor: "lead",
 		Resolution: resolution}))
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
-	}
+	unlandPlan(t, sv, id)
 }
 
-// writePlan puts a plan in the checkout so the accept edge's plan gate is
-// satisfied, and returns its path.
+// writePlan lands an APPROVED plan: the gate reads the default-branch
+// refs, not the checkout, so the fixture commits the file rather than
+// merely writing it (review finding on engine #15).
 func writePlan(t *testing.T, sv *Service, id string) string {
 	t.Helper()
 	plans := filepath.Join(sv.Root, "plans")
@@ -87,7 +86,19 @@ func writePlan(t *testing.T, sv *Service, id string) string {
 	if err := os.WriteFile(path, []byte("# fixture plan\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	mustGit(t, sv.Root, "add", "--", filepath.ToSlash(filepath.Join("plans", id+".md")))
+	mustGit(t, sv.Root, "-c", "user.email=t@example.invalid", "-c", "user.name=t",
+		"commit", "-m", "plan "+id)
 	return path
+}
+
+// unlandPlan removes an approved plan from the default branch and the
+// checkout, leaving the card as a store predating the gate holds it.
+func unlandPlan(t *testing.T, sv *Service, id string) {
+	t.Helper()
+	mustGit(t, sv.Root, "rm", "--quiet", "--", filepath.ToSlash(filepath.Join("plans", id+".md")))
+	mustGit(t, sv.Root, "-c", "user.email=t@example.invalid", "-c", "user.name=t",
+		"commit", "-m", "unland plan "+id)
 }
 
 // acceptedCard drives one card to done, optionally without evidence by
