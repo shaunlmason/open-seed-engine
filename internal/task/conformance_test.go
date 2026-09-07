@@ -113,7 +113,7 @@ func TestSpecDeclaredOutputs(t *testing.T) {
 			r2 := sv.Claim(idA, "w", "")
 			token2 := r2.Fields["claim_token"].(string)
 			results["transition"] = sv.Transition(TransitionArgs{Verb: "transition", ID: idA, To: "review", Actor: "w", Token: token2})
-			results["close"] = sv.Transition(TransitionArgs{Verb: "close", ID: idA, Actor: "lead", Resolution: "done"})
+			results["close"] = sv.Transition(TransitionArgs{Verb: "close", ID: idA, Actor: "lead", NoPR: true, Resolution: "done"})
 			results["get"] = sv.Get(idA)
 
 			check := func(verb string, spec verbSpec) {

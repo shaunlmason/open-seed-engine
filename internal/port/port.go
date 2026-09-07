@@ -47,6 +47,14 @@ type Request struct {
 	// resolution_present precondition reads it, so the requirement stays
 	// in the table rather than in a caller's branch.
 	Resolution string
+	// PlanPresent reports whether the card's plan resolves, and NoPR
+	// whether the caller passed the D7 exemption flag. The
+	// plan_or_exemption precondition reads both. They are supplied facts,
+	// exactly as Resolution is: this package is the pure decision core and
+	// holds no filesystem or git, so the caller states the fact and the
+	// table decides what it means.
+	PlanPresent bool
+	NoPR        bool
 }
 
 // Outcome is the decision. Code is a port exit code from port.json. When
@@ -165,6 +173,15 @@ func checkPrecondition(pc spec.Precondition, card Card, cred Credential, req Req
 		// conformance lint, and `done` is terminal, so nothing can
 		// transition it back to repair it.
 		if strings.TrimSpace(req.Resolution) == "" {
+			return pc.FailError
+		}
+	case "plan_or_exemption":
+		// The D3 plan gate and the D7 exemption are alternatives, and one
+		// must hold before the card goes terminal. These are the two that
+		// can hold AT accept: the third the lint honors, an operator's
+		// recorded plan exemption, is a repair for cards that got past
+		// this point before the refusal existed.
+		if !req.PlanPresent && !req.NoPR {
 			return pc.FailError
 		}
 	case "unclaimed":

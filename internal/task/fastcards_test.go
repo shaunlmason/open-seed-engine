@@ -270,7 +270,7 @@ func TestFastcardsThroughputSmoke(t *testing.T) {
 		r := mustOK(t, sv.Claim(id, "agent-a", ""))
 		tok := r.Fields["claim_token"].(string)
 		mustOK(t, sv.Transition(TransitionArgs{Verb: "transition", ID: id, To: "review", Actor: "agent-a", Token: tok}))
-		mustOK(t, sv.Transition(TransitionArgs{Verb: "close", ID: id, Actor: "lead",
+		mustOK(t, sv.Transition(TransitionArgs{Verb: "close", ID: id, Actor: "lead", NoPR: true,
 			Resolution: "https://example.invalid/pr/1"}))
 	}
 	if elapsed := time.Since(start); elapsed > 30*time.Second {

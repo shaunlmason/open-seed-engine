@@ -197,7 +197,9 @@ func TestCLITaskLifecycle(t *testing.T) {
 	code, out, _ = seedRun(t, "task", "claim", id, "--actor", "c")
 	tok = mustJSON(t, out)["claim_token"].(string)
 	seedRun(t, "task", "transition", id, "--to", "review", "--actor", "c", "--token", tok)
-	code, out, _ = seedRun(t, "task", "close", id, "--actor", "lead", "--resolution", "done")
+	// The fixture card carries no plan, so the close takes the D7
+	// exemption the accept edge's plan gate asks for.
+	code, out, _ = seedRun(t, "task", "close", id, "--actor", "lead", "--no-pr", "--resolution", "done")
 	if code != 0 || mustJSON(t, out)["state"] != "done" {
 		t.Fatalf("close: %d %s", code, out)
 	}

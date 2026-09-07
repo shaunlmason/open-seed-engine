@@ -287,7 +287,7 @@ func TestCloseCascadeAutoUnblocks(t *testing.T) {
 	r := mustOK(t, a.Claim(blocker, "agent-a", ""))
 	tok := r.Fields["claim_token"].(string)
 	mustOK(t, a.Transition(TransitionArgs{Verb: "transition", ID: blocker, To: "review", Actor: "agent-a", Token: tok}))
-	closed := mustOK(t, a.Transition(TransitionArgs{Verb: "close", ID: blocker, Actor: "lead", Resolution: "merged PR #1"}))
+	closed := mustOK(t, a.Transition(TransitionArgs{Verb: "close", ID: blocker, Actor: "lead", NoPR: true, Resolution: "merged PR #1"}))
 
 	cascaded, _ := closed.Fields["cascaded"].([]string)
 	if len(cascaded) != 1 || cascaded[0] != dependent {

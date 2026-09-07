@@ -332,8 +332,11 @@ func (sv *Service) Transition(a TransitionArgs) *Result {
 			return nil, err
 		}
 		cred := sv.credential(a.Verb, a.Actor, a.Token)
-		out := port.Evaluate(sv.Spec, port.Request{Verb: a.Verb, To: a.To, Resolution: a.Resolution},
-			sv.portCard(c), cred)
+		// planResolves is the lint's own helper (statelint.go): the gate
+		// and the lint must not disagree about what "the plan resolves"
+		// means, so they share one derivation rather than two.
+		out := port.Evaluate(sv.Spec, port.Request{Verb: a.Verb, To: a.To, Resolution: a.Resolution,
+			PlanPresent: sv.planResolves(a.ID), NoPR: a.NoPR}, sv.portCard(c), cred)
 		if out.Code != 0 {
 			t := &stateref.Terminal{Code: out.Code, Name: out.Err}
 			if out.Detail != "" {

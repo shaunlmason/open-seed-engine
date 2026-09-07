@@ -76,10 +76,12 @@ func allVerbs(s *spec.Spec) []verbCase {
 	// has two sides, and a sweep that only ever passed evidence would
 	// never reach the refusing one.
 	for v := range named {
+		out = append(out, verbCase{Request{Verb: v, Resolution: "https://example.invalid/pr/1", PlanPresent: true}})
 		out = append(out, verbCase{Request{Verb: v, Resolution: "https://example.invalid/pr/1"}})
 		out = append(out, verbCase{Request{Verb: v}})
 	}
 	for cv := range s.Table.CompositeVerbs {
+		out = append(out, verbCase{Request{Verb: cv, Resolution: "https://example.invalid/pr/1", PlanPresent: true}})
 		out = append(out, verbCase{Request{Verb: cv, Resolution: "https://example.invalid/pr/1"}})
 		out = append(out, verbCase{Request{Verb: cv}})
 	}
@@ -134,6 +136,10 @@ func expect(s *spec.Spec, req Request, card Card, cred Credential) expectation {
 		switch pc.Name {
 		case "resolution_present":
 			if strings.TrimSpace(req.Resolution) == "" {
+				return expectation{code: pc.FailExit}
+			}
+		case "plan_or_exemption":
+			if !req.PlanPresent && !req.NoPR {
 				return expectation{code: pc.FailExit}
 			}
 		case "unclaimed":
@@ -223,7 +229,7 @@ func TestDesignInvariants(t *testing.T) {
 		}
 	})
 	t.Run("close is accept plus cascade, only from review", func(t *testing.T) {
-		closing := Request{Verb: "close", Resolution: "https://example.invalid/pr/1"}
+		closing := Request{Verb: "close", Resolution: "https://example.invalid/pr/1", PlanPresent: true}
 		got := Evaluate(s, closing, Card{State: "review"}, op)
 		if got.Code != 0 || got.NewState != "done" || !slices.Contains(got.Effects, "cascade") || !slices.Contains(got.Effects, "record_review") {
 			t.Fatalf("close from review: %+v", got)

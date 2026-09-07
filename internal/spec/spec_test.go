@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -265,4 +266,120 @@ func TestOlderTablesStillRequireEvidence(t *testing.T) {
 	if !found {
 		t.Fatal("an accept edge from a table predating resolution_present must be upgraded to carry it")
 	}
+}
+
+// TestAcceptPreconditionsUpgradeAnOlderTable pins the same compatibility
+// rule for the plan gate, and pins that the upgrade is per-precondition
+// rather than all-or-nothing: a table that predates both gains both, one
+// that already declares the evidence rule gains only the plan gate beside
+// it, and one that declares both is left exactly as written. A consuming
+// repository's .seed/port-schema/ moves independently of this binary, so a
+// checkout carrying any of those three shapes must end up enforcing the
+// same two rules.
+func TestAcceptPreconditionsUpgradeAnOlderTable(t *testing.T) {
+	src := filepath.Join("testdata", "seed", "port-schema")
+	// load writes the canonical spec into a temp dir with the accept
+	// edge's preconditions replaced by keep, and returns what Load made
+	// of it.
+	load := func(t *testing.T, keep []string) *Spec {
+		t.Helper()
+		dir := t.TempDir()
+		for _, name := range []string{"port.json", "transitions.json", "verbs.json"} {
+			b, err := os.ReadFile(filepath.Join(src, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name == "transitions.json" {
+				var doc map[string]any
+				if err := json.Unmarshal(b, &doc); err != nil {
+					t.Fatal(err)
+				}
+				for _, raw := range doc["transitions"].([]any) {
+					tr := raw.(map[string]any)
+					if tr["verb"] != "accept" {
+						continue
+					}
+					var kept []any
+					for _, p := range asSlice(tr["preconditions"]) {
+						if slices.Contains(keep, p.(map[string]any)["name"].(string)) {
+							kept = append(kept, p)
+						}
+					}
+					if kept == nil {
+						delete(tr, "preconditions")
+					} else {
+						tr["preconditions"] = kept
+					}
+				}
+				if b, err = json.Marshal(doc); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		s, err := Load(dir)
+		if err != nil {
+			t.Fatalf("the table must still load: %v", err)
+		}
+		return s
+	}
+	names := func(s *Spec) []string {
+		var out []string
+		for _, tr := range s.Table.Transitions {
+			if tr.Verb != "accept" {
+				continue
+			}
+			for _, pc := range tr.Preconditions {
+				out = append(out, pc.Name)
+			}
+		}
+		slices.Sort(out)
+		return out
+	}
+	want := []string{"plan_or_exemption", "resolution_present"}
+	for _, tc := range []struct {
+		name string
+		keep []string
+	}{
+		{"a table predating both gains both", nil},
+		{"a table declaring only the evidence rule gains the plan gate", []string{"resolution_present"}},
+		{"a table declaring only the plan gate gains the evidence rule", []string{"plan_or_exemption"}},
+		{"a table declaring both is left as written", want},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := names(load(t, tc.keep))
+			if !slices.Equal(got, want) {
+				t.Fatalf("accept preconditions = %v, want %v", got, want)
+			}
+		})
+	}
+	// The upgraded plan gate carries its refusal and its teaching text,
+	// naming both ways to satisfy it: the refusal is the only place a
+	// caller learns what to do next.
+	for _, tr := range load(t, nil).Table.Transitions {
+		if tr.Verb != "accept" {
+			continue
+		}
+		for _, pc := range tr.Preconditions {
+			if pc.Name != "plan_or_exemption" {
+				continue
+			}
+			if pc.FailError != "plan_required" || pc.FailExit != ExitInvalid {
+				t.Fatalf("the plan gate's refusal: %+v", pc)
+			}
+			for _, want := range []string{"plans/<id>.md", "--no-pr"} {
+				if !strings.Contains(pc.FailDetail, want) {
+					t.Fatalf("the refusal must name %q: %q", want, pc.FailDetail)
+				}
+			}
+		}
+	}
+}
+
+// asSlice reads a JSON array that may be absent.
+func asSlice(v any) []any {
+	s, _ := v.([]any)
+	return s
 }
