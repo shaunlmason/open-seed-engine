@@ -135,7 +135,7 @@ func Load(dir string) (*Spec, error) {
 	if err := readJSON(filepath.Join(dir, "transitions.json"), &s.Table); err != nil {
 		return nil, err
 	}
-	s.Table.ensureAcceptEvidence()
+	s.Table.ensureAcceptPreconditions()
 	if errs := s.Validate(); len(errs) > 0 {
 		return nil, fmt.Errorf("invalid spec in %s: %s", dir, joinErrs(errs))
 	}
@@ -153,28 +153,54 @@ var acceptEvidence = Precondition{
 		"the conformance lint, and done is terminal, so no transition can repair it.",
 }
 
-// ensureAcceptEvidence adds that precondition to any accept edge whose
-// table predates it. Enforcement lives in the table and nowhere else, but
-// the table ships in each consuming repository's .seed/port-schema/ and
-// those move independently of this binary: a checkout still carrying a
-// protocol-1 table written before the precondition existed would validate
-// fine, evaluate no precondition, and accept an evidence-free close,
-// recreating the permanently lint-failing card the requirement exists to
-// prevent. Upgrading the loaded table keeps ONE enforcement path rather
-// than adding a second one beside it, and a schema that already declares
-// the precondition is left exactly as written.
-func (t *Table) ensureAcceptEvidence() {
+// acceptPlanOrExemption is the second precondition an accept edge must
+// carry. The D3 plan gate and the D7 exemption are alternatives, and one
+// of them must hold at the moment the card becomes terminal: a card with
+// no plan, accepted without --no-pr, lands in done carrying evidence but
+// no exemption, and the done-consistency lint fails on it from then on.
+//
+// Repair after the fact exists but is expensive, which is the argument for
+// refusing here rather than there. `done` is terminal, so no transition
+// reaches such a card; the remedies are an operator's `exempt-plan`, a
+// retrospective plans/<id>.md authored to satisfy the lint by file, or
+// rewriting the store. All three are paid under a halt, because a failing
+// conformance lint refuses every mutating verb for every actor until
+// somebody resumes it. Refusing at the door costs one flag while the card
+// is still in review and still fixable.
+var acceptPlanOrExemption = Precondition{
+	Name:      "plan_or_exemption",
+	FailError: "plan_required",
+	FailExit:  ExitInvalid,
+	FailDetail: "this card has no plans/<id>.md: land its plan first, or accept with --no-pr " +
+		"--resolution <artifact URL> if it legitimately required none (a card whose deliverable " +
+		"was itself a plan PR, work that landed outside a seed/<id> task PR, an L1 card). A done " +
+		"card with neither fails the conformance lint, and done is terminal, so repairing it " +
+		"afterwards costs an operator verb under a halt.",
+}
+
+// ensureAcceptPreconditions adds both accept preconditions to any accept
+// edge whose table predates them. Enforcement lives in the table and
+// nowhere else, but the table ships in each consuming repository's
+// .seed/port-schema/ and those move independently of this binary: a
+// checkout still carrying a table written before a precondition existed
+// would validate fine, evaluate nothing, and accept the close the
+// requirement exists to prevent. Upgrading the loaded table keeps ONE
+// enforcement path rather than adding a second one beside it, and a schema
+// that already declares a precondition is left exactly as written.
+func (t *Table) ensureAcceptPreconditions() {
 	for i := range t.Transitions {
 		tr := &t.Transitions[i]
 		if tr.Verb != "accept" {
 			continue
 		}
-		if slices.ContainsFunc(tr.Preconditions, func(p Precondition) bool {
-			return p.Name == acceptEvidence.Name
-		}) {
-			continue
+		for _, want := range []Precondition{acceptEvidence, acceptPlanOrExemption} {
+			if slices.ContainsFunc(tr.Preconditions, func(p Precondition) bool {
+				return p.Name == want.Name
+			}) {
+				continue
+			}
+			tr.Preconditions = append(tr.Preconditions, want)
 		}
-		tr.Preconditions = append(tr.Preconditions, acceptEvidence)
 	}
 }
 

@@ -184,7 +184,10 @@ func TestLifecycleOverMCP(t *testing.T) {
 	if env, isErr = w.tool("task_transition", map[string]any{"task": id, "to": "review", "actor": "agent-1", "token": tok}); isErr {
 		t.Fatalf("review: %v", env)
 	}
-	if env, isErr = w.tool("task_close", map[string]any{"task": id, "actor": "lead", "resolution": "done via MCP"}); isErr {
+	// No plan on the fixture card, so the close carries the exemption the
+	// accept edge's plan gate asks for; no_pr reaches the service through
+	// the transport's own argument mapping.
+	if env, isErr = w.tool("task_close", map[string]any{"task": id, "actor": "lead", "resolution": "done via MCP", "no_pr": "true"}); isErr {
 		t.Fatalf("close: %v", env)
 	}
 	env, _ = w.tool("task_get", map[string]any{"task": id})

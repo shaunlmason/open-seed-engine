@@ -112,7 +112,7 @@ func TestDoneConsistencyRequiresPlanOrExemption(t *testing.T) {
 	r := mustOK(t, a.Claim(id, "agent-a", ""))
 	tok := r.Fields["claim_token"].(string)
 	mustOK(t, a.Transition(TransitionArgs{Verb: "transition", ID: id, To: "review", Actor: "agent-a", Token: tok}))
-	mustOK(t, a.Transition(TransitionArgs{Verb: "close", ID: id, Actor: "lead", Resolution: "PR merged (allegedly)"}))
+	closePlanless(t, a, id, "PR merged (allegedly)")
 
 	lint := a.StateLint(false, "maintenance")
 	if lint.Code == 0 {

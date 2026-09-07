@@ -7,6 +7,8 @@ package task
 // terminal, so no transition could ever repair it.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -56,6 +58,38 @@ func stripEvidence(t *testing.T, sv *Service, id string) {
 	}
 }
 
+// closePlanless closes a card that has no plan, producing the card a store
+// predating the plan_or_exemption precondition holds: done, evidenced, and
+// carrying neither a resolvable plan nor the D7 exemption. The door now
+// refuses exactly that close, which is the point of it, so the fixture
+// lends the card a plan for the transition and takes it back afterwards.
+// The lint and the repair verbs see the same card either way, and the
+// tests below are about them rather than about the door.
+func closePlanless(t *testing.T, sv *Service, id, resolution string) {
+	t.Helper()
+	path := writePlan(t, sv, id)
+	mustOK(t, sv.Transition(TransitionArgs{Verb: "close", ID: id, Actor: "lead",
+		Resolution: resolution}))
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writePlan puts a plan in the checkout so the accept edge's plan gate is
+// satisfied, and returns its path.
+func writePlan(t *testing.T, sv *Service, id string) string {
+	t.Helper()
+	plans := filepath.Join(sv.Root, "plans")
+	if err := os.MkdirAll(plans, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(plans, id+".md")
+	if err := os.WriteFile(path, []byte("# fixture plan\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // acceptedCard drives one card to done, optionally without evidence by
 // writing the review block the way the old accept path did.
 func acceptedCard(t *testing.T, sv *Service, resolution string) string {
@@ -65,8 +99,7 @@ func acceptedCard(t *testing.T, sv *Service, resolution string) string {
 	tok := r.Fields["claim_token"].(string)
 	mustOK(t, sv.Transition(TransitionArgs{Verb: "transition", ID: id, To: "review",
 		Actor: "agent-a", Token: tok}))
-	mustOK(t, sv.Transition(TransitionArgs{Verb: "close", ID: id, Actor: "lead",
-		Resolution: resolution}))
+	closePlanless(t, sv, id, resolution)
 	return id
 }
 
@@ -96,6 +129,10 @@ func TestAcceptRequiresEvidence(t *testing.T) {
 		if c := getCard(t, sv, id); c.State != "review" || c.Review != nil {
 			t.Fatalf("a refused accept must change nothing: state=%s review=%+v", c.State, c.Review)
 		}
+		// The accept edge now also carries the plan gate, and this drill
+		// is about the evidence rule, so the card gets a plan rather than
+		// the exemption: the evidence recorded stays the bare URL.
+		writePlan(t, sv, id)
 		mustOK(t, sv.Transition(TransitionArgs{Verb: verb, ID: id, Actor: "lead",
 			Resolution: "https://example.invalid/pr/7"}))
 		if c := getCard(t, sv, id); c.Review == nil || c.Review.Evidence != "https://example.invalid/pr/7" {
