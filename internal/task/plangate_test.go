@@ -167,3 +167,54 @@ func TestLintStillRefusesAPlanlessDoneCard(t *testing.T) {
 		t.Fatal("a recorded plan exemption must clear the lint")
 	}
 }
+
+// TestGateReadsTheConfiguredRemote pins the review finding on #16. Plan
+// resolution reads the refs alone, so the refs it reads have to be the ones
+// the repository actually coordinates through. A deployment whose
+// [coordination].remote is not origin keeps its approved plans under that
+// remote, and a single-branch or detached checkout has no local main or
+// master to fall back on, so probing a hard-coded origin misses every ref
+// and accept refuses with plan_required no matter how often the operator
+// fetches. The worktree fallback used to hide this; the gate has none.
+//
+// The two halves below differ in nothing but the configured remote.
+func TestGateReadsTheConfiguredRemote(t *testing.T) {
+	sv := fastService(t, "")
+	mustOK(t, sv.Init())
+	id := reviewReady(t, sv, "plan under a non-origin remote")
+
+	plans := filepath.Join(sv.Root, "plans")
+	if err := os.MkdirAll(plans, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plans, id+".md"), []byte("# approved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, sv.Root, "add", "--", "plans/"+id+".md")
+	mustGit(t, sv.Root, "-c", "user.email=t@example.invalid", "-c", "user.name=t",
+		"commit", "-m", "land the plan")
+	head := mustGit(t, sv.Root, "rev-parse", "HEAD")
+
+	// The plan lives only under upstream/main: no origin remote, and no
+	// local main or master, which is what a single-branch checkout looks
+	// like. Renaming the branch is what removes the local fallback.
+	mustGit(t, sv.Root, "branch", "-m", "work")
+	mustGit(t, sv.Root, "update-ref", "refs/remotes/upstream/main", head)
+
+	// Coordinating through origin (the default), nothing resolves.
+	if got := sv.coordinationRemote(); got != "origin" {
+		t.Fatalf("the default coordination remote is origin, got %q", got)
+	}
+	if sv.planApproved(id) {
+		t.Fatal("no ref under origin carries the plan")
+	}
+
+	// Coordinating through upstream, the same repository resolves it, and
+	// the gate opens. Before the fix this stayed refused forever.
+	sv.Cfg.Coordination.Remote = "upstream"
+	if !sv.planApproved(id) {
+		t.Fatal("the plan is on the configured remote's default branch and must count as approved")
+	}
+	mustOK(t, sv.Transition(TransitionArgs{Verb: "close", ID: id, Actor: "lead",
+		Resolution: "https://example.invalid/pr/1"}))
+}

@@ -166,7 +166,7 @@ func (sv *Service) planResolves(id string) bool {
 func (sv *Service) planApproved(id string) bool {
 	rel := "plans/" + id + ".md"
 	repo := &gitx.Repo{Dir: sv.Root}
-	for _, ref := range defaultBranchRefs(repo) {
+	for _, ref := range defaultBranchRefs(repo, sv.coordinationRemote()) {
 		if _, err := repo.Git("cat-file", "-e", ref+":"+rel); err == nil {
 			return true
 		}
@@ -174,18 +174,41 @@ func (sv *Service) planApproved(id string) bool {
 	return false
 }
 
+// coordinationRemote is the remote the repository coordinates through,
+// defaulting to origin for a zero config. The state store and the tag push
+// already read it, and plan resolution must agree with them: a deployment
+// that coordinates through a differently named remote keeps its approved
+// plans there, not under origin.
+func (sv *Service) coordinationRemote() string {
+	if sv.Cfg != nil && sv.Cfg.Coordination.Remote != "" {
+		return sv.Cfg.Coordination.Remote
+	}
+	return "origin"
+}
+
 // defaultBranchRefs names the refs that can carry an APPROVED plan, in
 // order: the remote's own default branch, then the conventional names.
 // HEAD and feature branches are deliberately absent, since a plan that
 // has not reached the default branch has not passed its plan PR.
-func defaultBranchRefs(repo *gitx.Repo) []string {
+//
+// The remote is the configured coordination remote, not a hard-coded
+// origin. Probing only origin makes the gate unsatisfiable wherever that
+// is not the remote in use: a single-branch or detached checkout has no
+// local main or master either, so every ref misses, and accept refuses
+// with plan_required however many times the operator fetches. The old
+// worktree fallback hid that; reading the refs alone does not, so the
+// refs have to be the right ones (review finding on #16).
+func defaultBranchRefs(repo *gitx.Repo, remote string) []string {
+	if remote == "" {
+		remote = "origin"
+	}
 	var refs []string
-	if out, err := repo.Git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
+	if out, err := repo.Git("symbolic-ref", "--quiet", "--short", "refs/remotes/"+remote+"/HEAD"); err == nil {
 		if named := strings.TrimSpace(out); named != "" {
 			refs = append(refs, named)
 		}
 	}
-	return append(refs, "origin/main", "origin/master", "main", "master")
+	return append(refs, remote+"/main", remote+"/master", "main", "master")
 }
 
 // replay walks the state ref's history (bounded) and checks every card state
