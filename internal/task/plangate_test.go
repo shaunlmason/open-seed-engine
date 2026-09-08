@@ -9,6 +9,8 @@ package task
 // the lint's own rule did not move when the door was added.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -81,6 +83,49 @@ func TestAcceptRefusesPlanlessCloseWithoutExemption(t *testing.T) {
 	}
 }
 
+// TestGateRefusesAPlanOnlyInTheWorktree pins the review finding on #15.
+// planResolves answers the lint, and takes the checkout's word: for a
+// re-runnable check that costs a re-read at worst. The gate cannot take
+// it. A plan written on the accepting branch and never merged would let
+// the card go terminal, and the file then vanishes on the next checkout,
+// leaving exactly the permanently lint-failing card the gate exists to
+// prevent. The gate therefore reads the default-branch refs alone.
+func TestGateRefusesAPlanOnlyInTheWorktree(t *testing.T) {
+	sv := fastService(t, "")
+	mustOK(t, sv.Init())
+	id := reviewReady(t, sv, "plan in the worktree only")
+
+	// Written, not committed: the lint's helper says yes, the gate says no.
+	plans := filepath.Join(sv.Root, "plans")
+	if err := os.MkdirAll(plans, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plans, id+".md"), []byte("# unmerged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !sv.planResolves(id) {
+		t.Fatal("the lint's helper takes the checkout's word")
+	}
+	if sv.planApproved(id) {
+		t.Fatal("an uncommitted plan has passed no PR gate and must not count as approved")
+	}
+	got := sv.Transition(TransitionArgs{Verb: "close", ID: id, Actor: "lead",
+		Resolution: "https://example.invalid/pr/1"})
+	if got.Code == 0 || got.Err != "plan_required" {
+		t.Fatalf("a worktree-only plan must not satisfy the gate: code=%d err=%s", got.Code, got.Err)
+	}
+
+	// Landed on the default branch, it does.
+	mustGit(t, sv.Root, "add", "--", "plans/"+id+".md")
+	mustGit(t, sv.Root, "-c", "user.email=t@example.invalid", "-c", "user.name=t",
+		"commit", "-m", "land the plan")
+	if !sv.planApproved(id) {
+		t.Fatal("a plan on the default branch is approved")
+	}
+	mustOK(t, sv.Transition(TransitionArgs{Verb: "close", ID: id, Actor: "lead",
+		Resolution: "https://example.invalid/pr/1"}))
+}
+
 // TestLintStillRefusesAPlanlessDoneCard pins that the door did not move the
 // lint. The conformance rule stays three-way: a resolvable plan, the no-pr:
 // evidence marker, or an operator's recorded plan exemption. Softening it
@@ -121,4 +166,55 @@ func TestLintStillRefusesAPlanlessDoneCard(t *testing.T) {
 	if lintFails(t, sv, bad) {
 		t.Fatal("a recorded plan exemption must clear the lint")
 	}
+}
+
+// TestGateReadsTheConfiguredRemote pins the review finding on #16. Plan
+// resolution reads the refs alone, so the refs it reads have to be the ones
+// the repository actually coordinates through. A deployment whose
+// [coordination].remote is not origin keeps its approved plans under that
+// remote, and a single-branch or detached checkout has no local main or
+// master to fall back on, so probing a hard-coded origin misses every ref
+// and accept refuses with plan_required no matter how often the operator
+// fetches. The worktree fallback used to hide this; the gate has none.
+//
+// The two halves below differ in nothing but the configured remote.
+func TestGateReadsTheConfiguredRemote(t *testing.T) {
+	sv := fastService(t, "")
+	mustOK(t, sv.Init())
+	id := reviewReady(t, sv, "plan under a non-origin remote")
+
+	plans := filepath.Join(sv.Root, "plans")
+	if err := os.MkdirAll(plans, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plans, id+".md"), []byte("# approved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, sv.Root, "add", "--", "plans/"+id+".md")
+	mustGit(t, sv.Root, "-c", "user.email=t@example.invalid", "-c", "user.name=t",
+		"commit", "-m", "land the plan")
+	head := mustGit(t, sv.Root, "rev-parse", "HEAD")
+
+	// The plan lives only under upstream/main: no origin remote, and no
+	// local main or master, which is what a single-branch checkout looks
+	// like. Renaming the branch is what removes the local fallback.
+	mustGit(t, sv.Root, "branch", "-m", "work")
+	mustGit(t, sv.Root, "update-ref", "refs/remotes/upstream/main", head)
+
+	// Coordinating through origin (the default), nothing resolves.
+	if got := sv.coordinationRemote(); got != "origin" {
+		t.Fatalf("the default coordination remote is origin, got %q", got)
+	}
+	if sv.planApproved(id) {
+		t.Fatal("no ref under origin carries the plan")
+	}
+
+	// Coordinating through upstream, the same repository resolves it, and
+	// the gate opens. Before the fix this stayed refused forever.
+	sv.Cfg.Coordination.Remote = "upstream"
+	if !sv.planApproved(id) {
+		t.Fatal("the plan is on the configured remote's default branch and must count as approved")
+	}
+	mustOK(t, sv.Transition(TransitionArgs{Verb: "close", ID: id, Actor: "lead",
+		Resolution: "https://example.invalid/pr/1"}))
 }
